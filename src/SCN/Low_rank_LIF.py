@@ -7,7 +7,7 @@ import numpy as np
 
 class Low_rank_LIF:
     F: np.ndarray
-    "Forward weights of the network: Nxdi."
+    r":math:`(N, d_i)`. Forward weights of the network."
 
     E: np.ndarray
     "Encoding weights of the network: Nxdo."
@@ -191,6 +191,13 @@ class Low_rank_LIF:
         y: np.ndarray,
         artists: list,
     ) -> None:
+        """
+        Animate the network.
+
+        Parameters
+        ----------
+
+        """
 
         # TODO animate_LIF(self)
         return

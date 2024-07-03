@@ -1,0 +1,5 @@
+*******
+Welcome
+*******
+
+Version: |version|

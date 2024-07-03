@@ -1,7 +1,7 @@
 import numpy as np
 
 
-def stimes_from_s(s: np.ndarray, dt: float | None = None) -> np.ndarray:
+def _stimes_from_s(s: np.ndarray, dt: float | None = None) -> np.ndarray:
     """
     Transforms spike raster to spike times
 
@@ -32,7 +32,7 @@ def stimes_from_s(s: np.ndarray, dt: float | None = None) -> np.ndarray:
     return stimes
 
 
-def s_from_stimes(
+def _s_from_stimes(
     stimes: np.ndarray, N: int = 10, time_steps: int = 10000, dt: float | None = None
 ) -> np.ndarray:
     """
@@ -70,7 +70,7 @@ def s_from_stimes(
     return s
 
 
-def deintegrate(x: np.ndarray, lamb: float = 1, dt: float = 0.001) -> np.ndarray:
+def _deintegrate(x: np.ndarray, lamb: float = 1, dt: float = 0.001) -> np.ndarray:
     """
     Reverse the integration of a signal with a given time step: from x to c
 
@@ -97,7 +97,7 @@ def deintegrate(x: np.ndarray, lamb: float = 1, dt: float = 0.001) -> np.ndarray
     return lamb * x + diff_x / dt
 
 
-def integrate(c: np.ndarray, lamb: float = 1, dt: float = 0.001) -> np.ndarray:
+def _integrate(c: np.ndarray, lamb: float = 1, dt: float = 0.001) -> np.ndarray:
     """
     Integrate a signal with a given time step: from c to x
 

@@ -7,14 +7,17 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FuncAnimation
 
-from .Autoencoder import Autoencoder
-from .Low_rank_LIF import Low_rank_LIF
-from .utils_neuro import deintegrate, integrate, stimes_from_s
+from .autoencoder import Autoencoder
+from .low_rank_LIF import Low_rank_LIF
+from .utils_neuro import _deintegrate, _integrate, _stimes_from_s
 
 available_plots = [[Autoencoder, 2, 2]]
 
 
 class Simulation:
+    """
+    Class info
+    """
 
     net: Low_rank_LIF
     "Network to run."
@@ -162,9 +165,9 @@ class Simulation:
 
         if c is None:
             assert x is not None, "An input (either x or c) should be provided"
-            c = deintegrate(x, self.net.lamb, dt)
+            c = _deintegrate(x, self.net.lamb, dt)
         else:
-            x = integrate(c, self.net.lamb, dt)
+            x = _integrate(c, self.net.lamb, dt)
         self.x = x
         self.c = c
 
@@ -212,7 +215,7 @@ class Simulation:
         self.y = y
         self.r = r
         self.s = s
-        self.stimes = stimes_from_s(s, dt)
+        self.stimes = _stimes_from_s(s, dt)
         self.V = V
 
         return y, r, s, V

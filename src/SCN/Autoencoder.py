@@ -5,7 +5,7 @@ import matplotlib.figure
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .Low_rank_LIF import Low_rank_LIF
+from .low_rank_LIF import Low_rank_LIF
 from .utils_plots import _gradient_line, _line_closest_point, _trick_axis
 
 
@@ -188,7 +188,7 @@ class Autoencoder(Low_rank_LIF):
             y = y - x[:, -1:]
 
         # Bounding box
-        artists = _draw_bbox(self, x0=x[:, -1], ax=ax)
+        artists = self._draw_bbox(x0=x[:, -1], ax=ax)
 
         # X Trajectory
         xfinal = ax.scatter(x[0, -1], x[1, -1], c="blue")
@@ -266,117 +266,116 @@ class Autoencoder(Low_rank_LIF):
         # move axes
         _trick_axis(ax, x[:, -1])
 
+    def _draw_bbox(
+        self,
+        x0: np.ndarray,
+        ax: matplotlib.axes.Axes,
+        artists: list | None = None,
+    ) -> list:
+        """
+        Plot an Autoencoder network.
 
-def _draw_bbox(
-    net,
-    x0: np.ndarray,
-    ax: matplotlib.axes.Axes,
-    artists: list | None = None,
-) -> list:
-    """
-    Plot an Autoencoder network.
+        Parameters
+        ----------
+        net : Autoencoder
+            Autoencoder to plot.
 
-    Parameters
-    ----------
-    net : Autoencoder
-        Autoencoder to plot.
+        x0 : ndarray of shape (di,)
+            Center of the bounding box.
 
-    x0 : ndarray of shape (di,)
-        Center of the bounding box.
+        ax : matplotlib.axes.Axes
+            Axes to plot to.
 
-    ax : matplotlib.axes.Axes
-        Axes to plot to.
+        artists : list, default=None
+            List of artists to modify. If None, new artists are created.
 
-    artists : list, default=None
-        List of artists to modify. If None, new artists are created.
+        Returns
+        -------
+        artists : list
+            List of artists in the plot. Either the same as input or the new ones.
 
-    Returns
-    -------
-    artists : list
-        List of artists in the plot. Either the same as input or the new ones.
+        """
+        first_frame = artists is None
 
-    """
-    first_frame = artists is None
+        if first_frame:
+            artists = []
+        # plot the network
+        if self.di == 2:
 
-    if first_frame:
-        artists = []
-    # plot the network
-    if net.di == 2:
+            colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
 
-        colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+            def line_func(y1: np.ndarray, a: float, b: float, c: float) -> np.ndarray:
+                return (-a * y1 - c) / b
 
-        def line_func(y1: np.ndarray, a: float, b: float, c: float) -> np.ndarray:
-            return (-a * y1 - c) / b
-
-        y1x = np.linspace(x0[0] - 1, x0[0] + 1, 100)
-        y2x = np.linspace(x0[1] - 1, x0[1] + 1, 100)
-        for n in range(net.N):
-            a = net.D[0, n]
-            b = net.D[1, n]
-            c = net.T[n] - net.D[:, n].T @ x0
-            yo = (
-                line_func(y1x, a, b, c)
-                if np.abs(a) < np.abs(b)
-                else line_func(y2x, b, a, c)
-            )
-            y1 = y1x if np.abs(a) < np.abs(b) else yo
-            y2 = yo if np.abs(a) < np.abs(b) else y2x
-
-            # polygon (to optimize: no redraw)
-            if not first_frame:
-                artists[n][0].remove()
-            if np.abs(a) < np.abs(b):
-                poly = ax.fill_between(
-                    y1,
-                    y2,
-                    y2=x0[1] - np.sign(b),
-                    color=colors[n],
-                    interpolate=True,
-                    alpha=0.2,
+            y1x = np.linspace(x0[0] - 1, x0[0] + 1, 100)
+            y2x = np.linspace(x0[1] - 1, x0[1] + 1, 100)
+            for n in range(self.N):
+                a = self.D[0, n]
+                b = self.D[1, n]
+                c = self.T[n] - self.D[:, n].T @ x0
+                yo = (
+                    line_func(y1x, a, b, c)
+                    if np.abs(a) < np.abs(b)
+                    else line_func(y2x, b, a, c)
                 )
-            else:
-                poly = ax.fill_betweenx(
-                    y2,
-                    y1,
-                    x2=x0[0] - np.sign(a),
-                    color=colors[n],
-                    interpolate=True,
-                    alpha=0.2,
-                )
-            if not first_frame:
-                artists[n][0] = poly
+                y1 = y1x if np.abs(a) < np.abs(b) else yo
+                y2 = yo if np.abs(a) < np.abs(b) else y2x
 
-            # line
-            line = None
-            if first_frame:
-                line = ax.plot(y1, y2, linewidth=3, c=colors[n])[0]
-            else:
-                artists[n][1].set_xdata(y1)
-                artists[n][1].set_ydata(y2)
+                # polygon (to optimize: no redraw)
+                if not first_frame:
+                    artists[n][0].remove()
+                if np.abs(a) < np.abs(b):
+                    poly = ax.fill_between(
+                        y1,
+                        y2,
+                        y2=x0[1] - np.sign(b),
+                        color=colors[n],
+                        interpolate=True,
+                        alpha=0.2,
+                    )
+                else:
+                    poly = ax.fill_betweenx(
+                        y2,
+                        y1,
+                        x2=x0[0] - np.sign(a),
+                        color=colors[n],
+                        interpolate=True,
+                        alpha=0.2,
+                    )
+                if not first_frame:
+                    artists[n][0] = poly
 
-            # quiver
-            quiver = None
-            q0, q1 = _line_closest_point(x0[0], x0[1], a, b, c)
-            if first_frame:
-                quiver = ax.quiver(
-                    q0,
-                    q1,
-                    a,
-                    b,
-                    color=colors[n],
-                    scale=5,
-                    scale_units="xy",
-                    angles="xy",
-                )
-            else:
-                artists[n][2].set_offsets([q0, q1])
-                artists[n][2].set_UVC(a, b)
+                # line
+                line = None
+                if first_frame:
+                    line = ax.plot(y1, y2, linewidth=3, c=colors[n])[0]
+                else:
+                    artists[n][1].set_xdata(y1)
+                    artists[n][1].set_ydata(y2)
 
-            if first_frame:
-                artists.append([poly, line, quiver])
+                # quiver
+                quiver = None
+                q0, q1 = _line_closest_point(x0[0], x0[1], a, b, c)
+                if first_frame:
+                    quiver = ax.quiver(
+                        q0,
+                        q1,
+                        a,
+                        b,
+                        color=colors[n],
+                        scale=5,
+                        scale_units="xy",
+                        angles="xy",
+                    )
+                else:
+                    artists[n][2].set_offsets([q0, q1])
+                    artists[n][2].set_UVC(a, b)
 
-        ax.set_xlim(x0[0] - 1, x0[0] + 1)
-        ax.set_ylim(x0[1] - 1, x0[1] + 1)
-        ax.set_aspect("equal")
+                if first_frame:
+                    artists.append([poly, line, quiver])
 
-    return artists
+            ax.set_xlim(x0[0] - 1, x0[0] + 1)
+            ax.set_ylim(x0[1] - 1, x0[1] + 1)
+            ax.set_aspect("equal")
+
+        return artists

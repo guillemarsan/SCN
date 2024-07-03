@@ -394,12 +394,11 @@ class Simulation:
         idx : int
             Index of the neuron to spike.
         """
-        idx = (
+        idx = int(
             np.argmax(V - self.net.T)
             if self.criterion == "max"
             else np.random.choice(candidates)
         )
-        assert isinstance(idx, int)
         return idx
 
     # PLOTTING ####

@@ -15,18 +15,49 @@ available_plots = [[Autoencoder, 2, 2]]
 
 
 class Simulation:
-    """
-    Class info
+    r"""
+    Simulation of a network.
+
+    :math:`\dot{\mathbf{V}}(t) = -\lambda \mathbf{V}(t) + \mathbf{F} \mathbf{c}(t) + \mathbf{W} \mathbf{s}(t)`
+    (see :class:`~SCN.low_rank_LIF.Low_rank_LIF`)
+
+    Main functions:
+        - run: run the network with specific input and integration parameters
+        - plot: plot the results of the simulation
+        - animate: animate the results of the simulation
+
+    Examples
+    --------
+    >>> from SCN import Autoencoder
+    >>> from SCN import Simulation
+    >>> net.plot()
+    ...
+    >>> sim = Simulation()
+    >>> x = np.tile([[0.5], [1]], (1, 10000))
+    >>> sim.run(net, x)
+    >>> sim.animate()
     """
 
     net: Low_rank_LIF
-    "Network to run."
+    "Network to run. Class :class:`~SCN.low_rank_LIF.Low_rank_LIF` or subclasses."
+
+    x: np.ndarray
+    r"Integrated input to the network. :math:`d_i \times time\_steps`."
+
+    y0: np.ndarray
+    r"Initial output of the network. :math:`d_o \times 1`."
+
+    r0: np.ndarray
+    r"Initial rate of the neurons. :math:`N \times 1`."
+
+    V0: np.ndarray
+    r"Initial voltage of the neurons. :math:`N \times 1`."
 
     I: float
-    "External input current."
+    r"External input current. :math:`N \times 1`."
 
     draw_break: str
-    "How to break a draw between spikes: 'no', 'slowmo' or 'one'."
+    "How to break a draw between spikes. Either 'no', 'slowmo' or 'one'."
 
     criterion: str
     "How to choose the neuron to spike in case draw_break='slowmo' or 'one'."
@@ -37,35 +68,23 @@ class Simulation:
     Tmax: float
     "Duration of the simulation (s)."
 
-    x: np.ndarray
-    "Integrated input to the network: di x time_steps."
-
     c: np.ndarray
-    "Input to the network. di x time_steps."
+    r"Input to the network. :math:`d_i \times time\_steps`."
 
     y: np.ndarray
-    "Output of the network. do x time_steps."
-
-    y0: np.ndarray
-    "Initial output of the network. do x 1."
+    r"Output of the network. :math:`d_o \times time\_steps`."
 
     r: np.ndarray
-    "Rate of the neurons. N x time_steps."
-
-    r0: np.ndarray
-    "Initial rate of the neurons. N x 1."
+    r"Rate of the neurons. :math:`N \times time\_steps`."
 
     s: np.ndarray
-    "Spike trains of the neurons. bool N x time_steps."
+    r"Spike trains of the neurons. bool :math:`N \times time\_steps`."
 
     stimes: np.ndarray
-    "Spike times of the neurons. #spikes x 2. First row is the neuron index and the second row the spike time."
+    r"Spike times of the neurons. :math:`\#spikes \times 2`.. First row is the neuron index and the second row the spike time."
 
     V: np.ndarray
-    "Voltage of the neurons. N x time_steps."
-
-    V0: np.ndarray
-    "Initial voltage of the neurons. N x 1."
+    r"Voltage of the neurons. :math:`N \times time\_steps`."
 
     def run(
         self,

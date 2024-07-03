@@ -6,66 +6,37 @@ import numpy as np
 
 
 class Low_rank_LIF:
-    F: np.ndarray
-    r":math:`(N, d_i)`. Forward weights of the network."
-
-    E: np.ndarray
-    "Encoding weights of the network: Nxdo."
-
-    D: np.ndarray
-    "Decoding weights of the network: doxN."
-
-    W: np.ndarray
-    "Recurrent weights of the network: NxN. W = ED"
-
-    lamb: float
-    "Leak timescale of the network."
-
-    T: np.ndarray
-    "Threshold of the neurons: Nx1."
-
-    """
+    r"""
     Low-rank LIF model.
 
-    Differential equation:
+    :math:`N` neurons, :math:`d_i` input dimensions, :math:`d_o` output dimensions.
 
-    N neurons, di input dimensions, do output dimensions.
+    :math:`\dot{\mathbf{V}}(t) = -\lambda \mathbf{V}(t) + \mathbf{F} \mathbf{c}(t) + \mathbf{W} \mathbf{s}(t)`
+    where :math:`\lambda \in \mathbb{R}_+, \mathbf{V} \in \mathbb{R}^N, \mathbf{c} \in \mathbb{R}^{d_i},
+    \mathbf{F} \in \mathbb{R}^{N \times d_i}, \mathbf{s} \in \mathbb{R}^N` is the spike train and
+    :math:`\mathbf{W} \in \mathbb{R}^{N \times N}` fulfills :math:`\text{rank}(\mathbf{W}) = d_o < N`,
+    i.e. :math:`W=ED` with :math:`\mathbf{E} \in \mathbb{R}^{N \times d_o}` and
+    :math:`\mathbf{D} \in \mathbb{R}^{d_o \times N}`.
 
-    Attributes
-    ----------
-    F : ndarray of shape (N, di)
-        Forward weights of the network.
+    This leads to the voltage equation:
+    :math:`\mathbf{V}(t) = \mathbf{F} \mathbf{x}(t) + \mathbf{W} \mathbf{r}(t)` where
+    :math:`\dot{\mathbf{x}}(t) = - \lambda \mathbf{x}(t) + \mathbf{c}(t)` and
+    :math:`\dot{\mathbf{r}}(t) = - \lambda \mathbf{r}(t) + \mathbf{s}(t)`.
 
-    E : ndarray of shape (N, do)
-        Encoding weights of the network.
-
-    D : ndarray of shape (do, N)
-        Decoding weights of the network.
-
-    W : ndarray of shape (N, N)
-        Recurrent weights of the network. W = ED.
-
-    lamb : float, default=1
-        Leak timescale of the network.
-
-    T : ndarray of shape (N,)
-        Threshold of the neurons.
 
     See Also
     --------
-    MLPRegressor : Multi-layer Perceptron regressor.
+    :class:`~SCN.autoencoder.Autoencoder` : Autoencoder specialization.
 
     Notes
     -----
-    Blabla.
+    ...
 
     References
     ----------
-    Hinton, Geoffrey E. "Connectionist learning procedures."
-    Artificial intelligence 40.1 (1989): 185-234.
-
-    :arxiv:`Kingma, Diederik, and Jimmy Ba (2014)
-    "Adam: A method for stochastic optimization." <1412.6980>`
+    Podlaski, William & Machens, Christian. (2024). Approximating Nonlinear Functions
+    With Latent Boundaries in Low-Rank Excitatory-Inhibitory Spiking Networks.
+    Neural Computation. 36. 803-857. 10.1162/neco_a_01658.
 
     Examples
     --------
@@ -83,6 +54,24 @@ class Low_rank_LIF:
     >>> clf.score(X_test, y_test)
     0.8...
     """
+
+    F: np.ndarray
+    r"Forward weights of the network. :math:`N \times d_i`"
+
+    E: np.ndarray
+    r"Encoding weights of the network. :math:`N \times d_o`"
+
+    D: np.ndarray
+    r"Decoding weights of the network. :math:`d_o \times N`"
+
+    W: np.ndarray
+    r"Recurrent weights of the network. :math:`N \times N`. The weights are low-rank, i.e. :math:`W = ED`"
+
+    lamb: float
+    "Leak timescale of the network."
+
+    T: np.ndarray
+    r"Thresholds of the neurons. :math:`N \times 1`"
 
     def __init__(
         self,

@@ -15,10 +15,10 @@ SCN.autoencoder.Autoencoder
 
    .. autosummary::
 
+      ~Autoencoder.D
       ~Autoencoder.F
       ~Autoencoder.E
       ~Autoencoder.W
-      ~Autoencoder.D
       ~Autoencoder.lamb
       ~Autoencoder.T
 

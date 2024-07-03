@@ -10,45 +10,17 @@ from .utils_plots import _gradient_line, _line_closest_point, _trick_axis
 
 
 class Autoencoder(Low_rank_LIF):
-    F: np.ndarray
-    "Forward weights of the network: Nxdi. F= D^\top"
+    r"""
+    Autoencoder model. Subclass of the Low-rank LIF model with :math:`\mathbf{F} = -\mathbf{E} = \mathbf{D}^\top`.
 
-    E: np.ndarray
-    "Encoding weights of the network: Nxdo. E = -D^\top"
+    :math:`N` neurons, :math:`d_i = d_o` signal dimensions.
 
-    W: np.ndarray
-    "Recurrent weights of the network: NxN. W = -D^\top D"
-
-    """
-    Autoencoder model.
-
-    Differential equation:
-
-    N neurons, do = di dimensions.
-
-    Attributes
-    ----------
-    F : ndarray of shape (N, di)
-        Forward weights of the network. F= D^\top
-
-    E : ndarray of shape (N, do)
-        Encoding weights of the network. E = -D^\top
-
-    D : ndarray of shape (do, N)
-        Decoding weights of the network.
-
-    W : ndarray of shape (N, N)
-        Recurrent weights of the network. W = -D^\top D
-
-    lamb : float, default=1
-        Leak timescale of the network.
-
-    T : ndarray of shape (N,)
-        Threshold of the neurons.
+    This leads to the voltage equation:
+    :math:`\mathbf{V}(t) = \mathbf{D}^\top (\mathbf{x}(t) - \mathbf{D} \mathbf{r}(t))`.
 
     See Also
     --------
-    MLPRegressor : Multi-layer Perceptron regressor.
+    :class:`~SCN.low_rank_LIF.Low_rank_LIF` : Parent model Low_rank_LIF.
 
     Notes
     -----
@@ -56,28 +28,47 @@ class Autoencoder(Low_rank_LIF):
 
     References
     ----------
-    Hinton, Geoffrey E. "Connectionist learning procedures."
-    Artificial intelligence 40.1 (1989): 185-234.
+    Calaim, Nuno, Florian Alexander Dehmelt, Pedro J Gonçalves, and Christian K Machens.
+    “Robustness in Spiking Networks: a Geometric Perspective,” 2021.
+    https://doi.org/10.1101/2020.06.15.148338.
 
-    :arxiv:`Kingma, Diederik, and Jimmy Ba (2014)
-    "Adam: A method for stochastic optimization." <1412.6980>`
+
+    Denève, Sophie, and Christian K. Machens. “Efficient Codes and Balanced Networks.”
+    Nature Neuroscience 19, no. 3 (February 23, 2016): 375–82. https://doi.org/10.1038/nn.4243.
+
+    Boerlin, Martin, Christian K. Machens, and Sophie Denève. “Predictive Coding of Dynamical
+    Variables in Balanced Spiking Networks.” PLoS Computational Biology 9, no. 11 (November 2013).
+    https://doi.org/10.1371/journal.pcbi.1003258.
 
     Examples
     --------
-    >>> from sklearn.neural_network import MLPClassifier
-    >>> from sklearn.datasets import make_classification
-    >>> from sklearn.model_selection import train_test_split
-    >>> X, y = make_classification(n_samples=100, random_state=1)
-    >>> X_train, X_test, y_train, y_test = train_test_split(X, y, stratify=y,
-    ...                                                     random_state=1)
-    >>> clf = MLPClassifier(random_state=1, max_iter=300).fit(X_train, y_train)
-    >>> clf.predict_proba(X_test[:1])
-    array([[0.038..., 0.961...]])
-    >>> clf.predict(X_test[:5, :])
-    array([1, 0, 1, 0, 1])
-    >>> clf.score(X_test, y_test)
-    0.8...
+    >>> from SCN import Autoencoder
+    >>> from SCN import Simulation
+    >>> net.plot()
+    ...
+    >>> sim = Simulation()
+    >>> x = np.tile([[0.5], [1]], (1, 10000))
+    >>> sim.run(net, x)
+    >>> sim.animate()
     """
+
+    D: np.ndarray
+    r"Weights of the network. :math:`d_o = d_i \times N`"
+
+    F: np.ndarray
+    r"Forward weights of the network. :math:`N \times d_i`. In Autoencoder, :math:`F= D^\top`"
+
+    E: np.ndarray
+    r"Encoding weights of the network. :math:`N \times d_o`. In Autoencoder, :math:`E= -D^\top`"
+
+    W: np.ndarray
+    r"Recurrent weights of the network. :math:`N \times N`. The weights are low-rank, i.e. :math:`W = -D^\top D`"
+
+    lamb: float
+    "Leak timescale of the network."
+
+    T: np.ndarray
+    r"Thresholds of the neurons. :math:`N \times 1`"
 
     def __init__(
         self,
@@ -85,16 +76,16 @@ class Autoencoder(Low_rank_LIF):
         T: np.ndarray | None = None,
         lamb: float = 1,
     ) -> None:
-        """
+        r"""
         Constructor with specific parameters.
 
         Parameters
         ----------
         D : ndarray of shape (do, N)
-            Decoding weights of the network.
+            Weights of the network.
 
         T : ndarray of shape (N,)
-            Threshold of the neurons. If None, Ti = 1/2 ||D_i||^2.
+            Threshold of the neurons. If None, :math:`T_i = \frac{||D_i||^2}{2}`.
 
         lamb : float, default=1
             Leak timescale of the network.
@@ -140,7 +131,7 @@ class Autoencoder(Low_rank_LIF):
         save: bool = True,
     ) -> tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, list]:
         """
-        Plot the network.
+        Plot the network: bounding box (and trajectories)
 
         If x and y are passed, this is also plotted as trajectories in the bounding box.
 
@@ -273,13 +264,10 @@ class Autoencoder(Low_rank_LIF):
         artists: list | None = None,
     ) -> list:
         """
-        Plot an Autoencoder network.
+        Plot the bounding box of an Autoencoder network.
 
         Parameters
         ----------
-        net : Autoencoder
-            Autoencoder to plot.
-
         x0 : ndarray of shape (di,)
             Center of the bounding box.
 
@@ -293,7 +281,6 @@ class Autoencoder(Low_rank_LIF):
         -------
         artists : list
             List of artists in the plot. Either the same as input or the new ones.
-
         """
         first_frame = artists is None
 

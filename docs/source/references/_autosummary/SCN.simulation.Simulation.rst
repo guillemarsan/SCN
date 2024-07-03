@@ -16,21 +16,21 @@ SCN.simulation.Simulation
    .. autosummary::
 
       ~Simulation.net
+      ~Simulation.x
+      ~Simulation.y0
+      ~Simulation.r0
+      ~Simulation.V0
       ~Simulation.I
       ~Simulation.draw_break
       ~Simulation.criterion
       ~Simulation.dt
       ~Simulation.Tmax
-      ~Simulation.x
       ~Simulation.c
       ~Simulation.y
-      ~Simulation.y0
       ~Simulation.r
-      ~Simulation.r0
       ~Simulation.s
       ~Simulation.stimes
       ~Simulation.V
-      ~Simulation.V0
 
 
 

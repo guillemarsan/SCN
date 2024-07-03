@@ -124,3 +124,30 @@ def _integrate(c: np.ndarray, lamb: float = 1, dt: float = 0.001) -> np.ndarray:
         x[:, i] = x[:, i - 1] + dt * (-lamb * x[:, i - 1] + c[:, i - 1])
 
     return x
+
+
+def _neurons_spiked_between(stimes: np.ndarray, t0: float, t1: float) -> list:
+    """
+    Get the neurons that spiked between two times
+
+    Parameters
+    ----------
+    stimes: np.ndarray of int/float(#spikes,2)
+        Spike times. First column is the neuron index and the second column is the spike time.
+
+    t0: float
+        Initial time
+
+    t1: float
+        Final time
+
+    Returns
+    -------
+    neurons: list(int)
+        Neurons that spiked between t0 and t1
+    """
+    return (
+        np.unique(stimes[(stimes[:, 1] >= t0) & (stimes[:, 1] < t1), 0])
+        .astype(int)
+        .tolist()
+    )

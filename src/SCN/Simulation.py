@@ -9,7 +9,12 @@ from matplotlib.animation import FuncAnimation
 
 from .autoencoder import Autoencoder
 from .low_rank_LIF import Low_rank_LIF
-from .utils_neuro import _deintegrate, _integrate, _stimes_from_s
+from .utils_neuro import (
+    _deintegrate,
+    _integrate,
+    _neurons_spiked_between,
+    _stimes_from_s,
+)
 
 available_plots = [[Autoencoder, 2, 2]]
 
@@ -449,7 +454,9 @@ class Simulation:
             axes = [ax1, ax2, ax3]
 
         _, _, artists_io = self.plot_io(ax=ax1, t=self.Tmax, save=False)
+        ax1.set_xlabel("")
         _, _, artists_spikes = self.plot_spikes(ax=ax2, t=self.Tmax, save=False)
+        ax2.set_xlabel("")
         _, _, artists_rates = self.plot_rates(ax=ax3, t=self.Tmax, save=False)
         artists = [artists_io, artists_spikes, artists_rates]
         if geometry:
@@ -511,10 +518,12 @@ class Simulation:
             artists.append([linex, liney])
 
         ax.set_ylabel("x(t)/y(t)")
-        ax.set_xlabel("Time (s)")
+        ax.set_xlabel("time (s)")
         ax.set_xlim(-0.5, self.Tmax + 0.5)
         ax.set_ylim(np.min(self.y) - 0.05, np.max(self.y) + 0.05)
         ax.legend()
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
 
         fig = ax.get_figure()
         assert fig is not None
@@ -569,9 +578,12 @@ class Simulation:
         artists.append(scatter)
 
         ax.set_ylabel("s(t)")
-        ax.set_xlabel("Time (s)")
-        ax.set_ylim(-0.5, self.net.N + 0.5)
+        ax.set_xlabel("time (s)")
+        ax.set_ylim(-0.5, self.net.N - 0.5)
+        ax.set_yticks(np.arange(self.net.N))
         ax.set_xlim(-0.5, self.Tmax + 0.5)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
 
         fig = ax.get_figure()
         assert fig is not None
@@ -625,10 +637,12 @@ class Simulation:
             artists.append(line)
 
         ax.set_ylabel("r(t)")
-        ax.set_xlabel("Time (s)")
+        ax.set_xlabel("time (s)")
         ax.set_xlim(-0.5, self.Tmax + 0.5)
         ax.set_ylim(np.min(self.r) - 0.05, np.max(self.r) + 0.05)
         ax.legend()
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
 
         fig = ax.get_figure()
         assert fig is not None
@@ -674,7 +688,9 @@ class Simulation:
 
         artists = []
         _, _, artists_io = self.plot_io(ax=ax1, t=0, save=False)
+        ax1.set_xlabel("")
         _, _, artists_spikes = self.plot_spikes(ax=ax2, t=0, save=False)
+        ax2.set_xlabel("")
         _, _, artists_rates = self.plot_rates(ax=ax3, t=0, save=False)
         artists = [artists_io, artists_spikes, artists_rates]
 
@@ -683,7 +699,6 @@ class Simulation:
             _, _, artists_net = self.net.plot(
                 ax=ax4, x=x, y=y, inverse=True, save=False
             )
-            artists_net = artists_net[-2:]
             artists.append(artists_net)
 
         def flatten(l: list) -> list:
@@ -694,6 +709,7 @@ class Simulation:
             )
 
         artists_flatten = flatten(artists)
+        spiked = np.zeros(self.net.N, dtype=int)
 
         def init():
             return artists_flatten
@@ -705,18 +721,41 @@ class Simulation:
             self._animate_spikes(artists=artists[1], t=t)
             self._animate_rates(artists=artists[2], t=t)
 
-            if geometry:
-                x, y = self._crop(t, "io")
+            return artists_flatten
 
-                assert ax4 is not None
-                self.net._animate(ax=ax4, artists=artists[3], x=x, y=y)
+        def update_geo(frame, artists, artists_flatten, spiked):
+            t = frame / anim_freq
+
+            self._animate_io(artists=artists[0], t=t)
+            self._animate_spikes(artists=artists[1], t=t)
+            self._animate_rates(artists=artists[2], t=t)
+
+            x, y = self._crop(t, "io")
+            newspiked = _neurons_spiked_between(self.stimes, (frame - 1) / anim_freq, t)
+            spiking = np.concatenate(
+                [np.array(newspiked, dtype=int), -np.argwhere(spiked).flatten()]
+            )
+            spiked[:] = 0
+            spiked[newspiked] = 1
+            assert ax4 is not None
+            self.net._animate(ax=ax4, artists=artists[3], x=x, y=y, spiking=spiking)
             return artists_flatten
 
         anim_freq = 10
         frames = self.Tmax * anim_freq
+        func = (
+            partial(update, artists=artists, artists_flatten=artists_flatten)
+            if not geometry
+            else partial(
+                update_geo,
+                artists=artists,
+                artists_flatten=artists_flatten,
+                spiked=spiked,
+            )
+        )
         ani = FuncAnimation(
             fig,
-            func=partial(update, artists=artists, artists_flatten=artists_flatten),
+            func=func,
             frames=np.arange(0, frames),
             init_func=init,
             blit=True,

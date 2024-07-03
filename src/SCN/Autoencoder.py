@@ -212,6 +212,7 @@ class Autoencoder(Low_rank_LIF):
         x: np.ndarray,
         y: np.ndarray,
         artists: list,
+        spiking: np.ndarray,
     ) -> None:
         """
         Animate the network by modifying the artists.
@@ -229,6 +230,9 @@ class Autoencoder(Low_rank_LIF):
 
         artists : list
             List of artists to modify.
+
+        spiking : ndarray(int)
+            Neurons spiking in this frame. -n if the neuron needs to be restored.
         """
 
         if x.ndim == 1:
@@ -256,6 +260,15 @@ class Autoencoder(Low_rank_LIF):
 
         # move axes
         _trick_axis(ax, x[:, -1])
+
+        # spike effect
+        for n in spiking:
+            # restore normal look
+            if n < 0:
+                artists[-n][1].set_linewidth(3)
+            # spike look
+            else:
+                artists[n][1].set_linewidth(10)
 
     def _draw_bbox(
         self,

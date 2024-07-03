@@ -179,6 +179,7 @@ class Low_rank_LIF:
         x: np.ndarray,
         y: np.ndarray,
         artists: list,
+        spiking: np.ndarray,
     ) -> None:
         """
         Animate the network.

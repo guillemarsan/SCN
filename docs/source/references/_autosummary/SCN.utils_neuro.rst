@@ -16,5 +16,6 @@ SCN.utils\_neuro
 
       _deintegrate
       _integrate
+      _neurons_spiked_between
       _s_from_stimes
       _stimes_from_s

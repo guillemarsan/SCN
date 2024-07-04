@@ -1,5 +1,3 @@
-from typing import Self
-
 import matplotlib.axes
 import matplotlib.figure
 import numpy as np
@@ -122,37 +120,6 @@ class Low_rank_LIF:
         self.T = T
         self.W = E @ D
         self.lamb = lamb
-
-    @classmethod
-    def random_init(
-        cls,
-        di: int = 1,
-        N: int = 10,
-        do: int = 1,
-    ) -> Self:
-        """
-        Constructor with specific dimensions, but random parameters.
-
-        Parameters
-        ----------
-        di : float, default=1
-            Input dimensions.
-
-        N : float, default=10
-            Number of neurons.
-
-        do : float, default=1
-            Output dimensions.
-
-        """
-
-        # random parameters
-        F = np.random.randn(N, di)
-        E = np.random.randn(N, do)
-        D = np.random.randn(do, N)
-        T = np.random.randn(N)
-
-        return cls(F, E, D, T)
 
     def plot(
         self,

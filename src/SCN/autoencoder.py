@@ -5,6 +5,7 @@ import matplotlib.figure
 import matplotlib.pyplot as plt
 import numpy as np
 
+from . import boundary
 from .low_rank_LIF import Low_rank_LIF
 from .utils_plots import _gradient_line, _line_closest_point, _trick_axis
 
@@ -73,8 +74,9 @@ class Autoencoder(Low_rank_LIF):
     def __init__(
         self,
         D: np.ndarray,
-        T: np.ndarray | None = None,
+        T: int | float | np.ndarray | None = None,
         lamb: float = 1,
+        spike_scale: int | float | np.ndarray = 1,
     ) -> None:
         r"""
         Constructor with specific parameters.
@@ -82,45 +84,216 @@ class Autoencoder(Low_rank_LIF):
         Parameters
         ----------
         D : ndarray of shape (do, N)
-            Weights of the network.
+            Weights of the network. The columns need to be normalized.
 
         T : ndarray of shape (N,)
-            Threshold of the neurons. If None, :math:`T_i = \frac{||D_i||^2}{2}`.
+            Threshold of the neurons. If None, :math:`T_i = 1/2`.
 
         lamb : float, default=1
             Leak timescale of the network.
 
+        spike_scale : int, float or ndarray, default=1
+            Scale of the spikes.
         """
-        if T is None:
-            T = 0.5 * np.linalg.norm(D, axis=0) ** 2
-            assert T is not None
 
-        super().__init__(F=D.T, E=-D.T, D=D, T=T, lamb=lamb)
+        assert all(np.abs(np.linalg.norm(D, axis=0) - 1) < 1e-10), (
+            "The columns of D need to be normalized, if you want to change the boundary"
+            + "use T, if you want to change the spike size use spike_scale"
+        )
+
+        if spike_scale is not None:
+            assert (
+                isinstance(spike_scale, (int, float))
+                or spike_scale.shape[0] == D.shape[1]
+            ), "spike_scale is a single value or an array with as many values as neurons"
+
+        F = D.T
+        E = -D.T
+
+        if T is None:
+            T = 0.5
+        elif isinstance(T, (int, float)):
+            T = T * np.ones(D.shape[1])
+
+        D = spike_scale * D
+
+        assert T is not None and not isinstance(T, (int, float))
+        super().__init__(F=F, E=E, D=D, T=T, lamb=lamb)
 
     @classmethod
-    def random_init(  # type: ignore[reportIncompatibleMethodOverride]
+    def init_random(  # type: ignore[reportIncompatibleMethodOverride]
         cls,
-        di: int = 2,
+        d: int = 2,
         N: int = 10,
+        seed: int | None = None,
+        T: int | float | np.ndarray | None = None,
+        lamb: float = 1,
+        spike_scale: int | float | np.ndarray = 1,
     ) -> Self:
-        """
-        Constructor with specific dimensions, but random parameters.
+        r"""
+        Random initialization of the Autoencoder network.
+        (see :func:`~SCN.boundary._sphere_random`)
 
         Parameters
         ----------
-        di : float, default=1
+        d : float, default=1
             Input dimensions.
 
         N : float, default=10
             Number of neurons.
 
+        seed : int or None, default=None
+            Seed for the random number generator.
+
+        T : ndarray of shape (N,)
+            Threshold of the neurons. If None, :math:`T_i = 1/2`.
+
+        lamb : float, default=1
+            Leak timescale of the network.
+
+        spike_scale : int, float or ndarray, default=1
+            Scale of the spikes.
+
+        Returns
+        -------
+        net: Autoencoder
+            Autoencoder network with random decoders.
         """
 
         # random parameters
-        D = np.random.randn(di, N)
-        T = 0.5 * np.linalg.norm(D, axis=0) ** 2
+        D = boundary._sphere_random(d=d, N=N, seed=seed)
 
-        return cls(D, T)
+        return cls(D, T, lamb, spike_scale)
+
+    @classmethod
+    def init_cube(
+        cls,
+        d: int = 2,
+        one_quadrant: bool = False,
+        T: int | float | np.ndarray | None = None,
+        lamb: float = 1,
+        spike_scale: int | float | np.ndarray = 1,
+    ) -> Self:
+        r"""
+        Hypercube initialization of the Autoencoder network.
+
+        Parameters
+        ----------
+        d : float, default=1
+            Input dimensions.
+
+        one_quadrant : bool, default=False
+            If True, the weights are in the first quadrant.
+
+        T : ndarray of shape (N,)
+            Threshold of the neurons. If None, :math:`T_i = 1/2`.
+
+        lamb : float, default=1
+            Leak timescale of the network.
+
+        spike_scale : int, float or ndarray, default=1
+            Scale of the spikes.
+
+        Returns
+        -------
+        net: Autoencoder
+            Autoencoder network with hypercube decoders.
+        """
+
+        # hypercube parameters
+        D = boundary._cube(d=d, one_quadrant=one_quadrant)
+
+        return cls(D, T, lamb, spike_scale)
+
+    @classmethod
+    def init_2D_spaced(
+        cls,
+        N: int = 10,
+        angle_range: list | None = None,
+        T: int | float | np.ndarray | None = None,
+        lamb: float = 1,
+        spike_scale: int | float | np.ndarray = 1,
+    ) -> Self:
+        r"""
+        Regularly spaced 2D initialization of the Autoencoder network.
+
+        :math:`N` neurons spaced regularly between `angle_range[0]` and `angle_range[1]`.
+        The decoders are :math:`\mathbf{D}_i = (-\cos(\alpha_i), -\sin(\alpha_i))`.
+
+        Parameters
+        ----------
+        N: int, default=10
+            Number of neurons.
+
+        angle_range : list, default=None
+            Range of angles for the neurons. If None, the range is :math:`[0, 2 \pi]`.
+
+        T : ndarray of shape (N,)
+            Threshold of the neurons. If None, :math:`T_i = 1/2`.
+
+        lamb : float, default=1
+            Leak timescale of the network.
+
+        spike_scale : int, float or ndarray, default=1
+            Scale of the spikes.
+
+        Returns
+        -------
+        net: Autoencoder
+            Autoencoder network with regularly spaced decoders.
+        """
+
+        # evenly spaced circular parameters
+        D = boundary._2D_circle_spaced(N=N, angle_range=angle_range)
+
+        return cls(D, T, lamb, spike_scale)
+
+    @classmethod
+    def init_2D_random(
+        cls,
+        N: int = 10,
+        angle_range: list | None = None,
+        seed: int | None = None,
+        T: int | float | np.ndarray | None = None,
+        lamb: float = 1,
+        spike_scale: int | float | np.ndarray = 1,
+    ) -> Self:
+        r"""
+        Randomly spaced 2D initialization of the Autoencoder network.
+
+        :math:`N` neurons spaced randomly between `angle_range[0]` and `angle_range[1]`.
+        The decoders are :math:`\mathbf{D}_i = (-\cos(\alpha_i), -\sin(\alpha_i))`.
+
+        Parameters
+        ----------
+        N: int, default=10
+            Number of neurons.
+
+        angle_range : list, default=None
+            Range of angles for the neurons. If None, the range is :math:`[0, 2 \pi]`.
+
+        seed : int or None, default=None
+            Seed for the random number generator.
+
+        T : ndarray of shape (N,)
+            Threshold of the neurons. If None, :math:`T_i = 1/2`.
+
+        lamb : float, default=1
+            Leak timescale of the network.
+
+        spike_scale : int, float or ndarray, default=1
+            Scale of the spikes.
+
+        Returns
+        -------
+        net: Autoencoder
+            Autoencoder network with randomly spaced decoders.
+        """
+
+        # randomly spaced circular parameters
+        D = boundary._2D_circle_random(N=N, angle_range=angle_range, seed=seed)
+
+        return cls(D, T, lamb, spike_scale)
 
     def plot(
         self,
@@ -310,9 +483,9 @@ class Autoencoder(Low_rank_LIF):
             y1x = np.linspace(x0[0] - 1, x0[0] + 1, 100)
             y2x = np.linspace(x0[1] - 1, x0[1] + 1, 100)
             for n in range(self.N):
-                a = self.D[0, n]
-                b = self.D[1, n]
-                c = self.T[n] - self.D[:, n].T @ x0
+                a = self.F[n, 0]
+                b = self.F[n, 1]
+                c = self.T[n] - self.F[n, :] @ x0
                 yo = (
                     line_func(y1x, a, b, c)
                     if np.abs(a) < np.abs(b)
@@ -360,8 +533,8 @@ class Autoencoder(Low_rank_LIF):
                     quiver = ax.quiver(
                         q0,
                         q1,
-                        a,
-                        b,
+                        self.D[0, n],
+                        self.D[1, n],
                         color=colors[n],
                         scale=5,
                         scale_units="xy",
@@ -369,7 +542,7 @@ class Autoencoder(Low_rank_LIF):
                     )
                 else:
                     artists[n][2].set_offsets([q0, q1])
-                    artists[n][2].set_UVC(a, b)
+                    artists[n][2].set_UVC(self.D[0, n], self.D[1, n])
 
                 if first_frame:
                     artists.append([poly, line, quiver])

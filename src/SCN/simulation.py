@@ -519,7 +519,7 @@ class Simulation:
         ax.set_ylabel("x(t)/y(t)")
         ax.set_xlabel("time (s)")
         ax.set_xlim(-0.5, self.Tmax + 0.5)
-        ax.set_ylim(np.min(self.y) - 0.05, np.max(self.y) + 0.05)
+        ax.set_ylim(np.min([self.y, self.x]) - 0.05, np.max([self.y, self.x]) + 0.05)
         ax.legend()
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
@@ -733,8 +733,8 @@ class Simulation:
             newspiked = _neurons_spiked_between(self.stimes, (frame - 1) / anim_freq, t)
             spiking = np.concatenate(
                 [
-                    np.array(newspiked, dtype=int) + 1,
                     -(np.argwhere(spiked).flatten() + 1),
+                    np.array(newspiked, dtype=int) + 1,
                 ]
             )
             spiked[:] = 0

@@ -232,7 +232,7 @@ class Autoencoder(Low_rank_LIF):
             List of artists to modify.
 
         spiking : ndarray(int)
-            Neurons spiking in this frame. -n if the neuron needs to be restored.
+            Neurons spiking in this frame. Index starting at 1. -n if the neuron needs to be restored.
         """
 
         if x.ndim == 1:
@@ -264,11 +264,11 @@ class Autoencoder(Low_rank_LIF):
         # spike effect
         for n in spiking:
             # restore normal look
-            if n < 0:
-                artists[-n][1].set_linewidth(3)
+            if n < 0:  # this weird indexing is to differentiate -0 from 0
+                artists[-(n + 1)][1].set_linewidth(3)
             # spike look
             else:
-                artists[n][1].set_linewidth(10)
+                artists[n - 1][1].set_linewidth(10)
 
     def _draw_bbox(
         self,

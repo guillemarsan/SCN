@@ -732,7 +732,10 @@ class Simulation:
             x, y = self._crop(t, "io")
             newspiked = _neurons_spiked_between(self.stimes, (frame - 1) / anim_freq, t)
             spiking = np.concatenate(
-                [np.array(newspiked, dtype=int), -np.argwhere(spiked).flatten()]
+                [
+                    np.array(newspiked, dtype=int) + 1,
+                    -(np.argwhere(spiked).flatten() + 1),
+                ]
             )
             spiked[:] = 0
             spiked[newspiked] = 1

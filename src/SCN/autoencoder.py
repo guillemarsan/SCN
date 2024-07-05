@@ -1,3 +1,4 @@
+import time
 from typing import Self
 
 import matplotlib.axes
@@ -7,7 +8,7 @@ import numpy as np
 
 from . import boundary
 from .low_rank_LIF import Low_rank_LIF
-from .utils_plots import _gradient_line, _line_closest_point, _trick_axis
+from .utils_plots import _gradient_line, _line_closest_point, _save_fig, _trick_axis
 
 
 class Autoencoder(Low_rank_LIF):
@@ -375,7 +376,8 @@ class Autoencoder(Low_rank_LIF):
         fig = ax.get_figure()
         assert fig is not None
         if save:
-            fig.savefig("autoencoder.png")
+            time_stamp = time.strftime("%Y%m%d-%H%M%S")
+            _save_fig(fig, time_stamp + "-autoencoder.png")
 
         return fig, ax, artists
 

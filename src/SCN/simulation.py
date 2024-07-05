@@ -1,3 +1,6 @@
+import random
+import string
+import time
 from functools import partial
 
 import matplotlib.axes
@@ -15,6 +18,7 @@ from .utils_neuro import (
     _neurons_spiked_between,
     _stimes_from_s,
 )
+from .utils_plots import _save_ani, _save_fig
 
 available_plots = [[Autoencoder, 2, 2]]
 
@@ -104,6 +108,7 @@ class Simulation:
         dt: float = 0.001,
         Tmax: float = 10,
         c: np.ndarray | None = None,
+        tag: str | None = None,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
         Run the network.
@@ -148,6 +153,9 @@ class Simulation:
 
         c : ndarray of shape (di,time_steps)
             Filtered input to the network. Only x or c should be provided.
+
+        tag : str, default=None
+            Tag of the simulation. If None, the tag is randomly generated.
 
         Returns
         -------
@@ -241,6 +249,12 @@ class Simulation:
         self.s = s
         self.stimes = _stimes_from_s(s, dt)
         self.V = V
+        self.time_stamp = time.strftime("%Y%m%d-%H%M%S")
+        self.tag = (
+            tag
+            if tag is not None
+            else "".join(random.choice(string.ascii_letters) for i in range(5))
+        )
 
         return y, r, s, V
 
@@ -464,7 +478,7 @@ class Simulation:
 
         plt.tight_layout()
         if save:
-            fig.savefig("test-plot.png")
+            _save_fig(fig, self.time_stamp + "-" + self.tag + "-plot.png")
 
         return fig, axes, artists
 
@@ -527,7 +541,7 @@ class Simulation:
         fig = ax.get_figure()
         assert fig is not None
         if save:
-            fig.savefig("test-io.png")
+            _save_fig(fig, self.time_stamp + "-" + self.tag + "-io-plot.png")
 
         return fig, ax, artists
 
@@ -587,7 +601,7 @@ class Simulation:
         fig = ax.get_figure()
         assert fig is not None
         if save:
-            fig.savefig("test-spikes.png")
+            _save_fig(fig, self.time_stamp + "-" + self.tag + "-spikes-plot.png")
 
         return fig, ax, artists
 
@@ -646,7 +660,7 @@ class Simulation:
         fig = ax.get_figure()
         assert fig is not None
         if save:
-            fig.savefig("test-rates.png")
+            _save_fig(fig, self.time_stamp + "-" + self.tag + "-rates-plot.png")
 
         return fig, ax, artists
 
@@ -763,9 +777,7 @@ class Simulation:
             blit=True,
         )
 
-        ani.save("test-inv_ticks.gif", writer="ffmpeg", fps=anim_freq)
-        plt.tight_layout()
-        plt.show(block=False)
+        _save_ani(ani, self.time_stamp + "-" + self.tag + "-animation.gif", anim_freq)
 
     def _animate_io(self, artists: list, t: float) -> None:
         """

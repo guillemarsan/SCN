@@ -1,5 +1,9 @@
-import matplotlib.axes as mpl_axes
+import os
+
+import matplotlib.animation
+import matplotlib.axes
 import matplotlib.colors as colors
+import matplotlib.figure
 import numpy as np
 from matplotlib.collections import LineCollection
 
@@ -72,13 +76,13 @@ def _line_closest_point(x0: float, y0: float, a: float, b: float, c: float):
     return x, y
 
 
-def _trick_axis(ax: mpl_axes.Axes, x0: np.ndarray) -> None:
+def _trick_axis(ax: matplotlib.axes.Axes, x0: np.ndarray) -> None:
     """
     Move the axis so the (0,0) is at x0.
 
     Parameters
     ----------
-    ax: mpl_axes.Axes
+    ax: matplotlib.axes.Axes
         Axis object to modify.
 
     x0: np.ndarray (2,)
@@ -104,3 +108,52 @@ def _trick_axis(ax: mpl_axes.Axes, x0: np.ndarray) -> None:
     yticks = nyticks - x0[1]
     ax.set_yticks(yticks)
     ax.set_yticklabels(nyticks)
+
+
+def _save_fig(fig: matplotlib.figure.Figure, name: str) -> None:
+    """
+    Save the figure.
+
+    Parameters
+    ----------
+    fig: matplotlib.figure.Figure
+        Figure to save.
+
+    name: str
+        Name of the file to save.
+    """
+
+    path = "./plots/"
+    if not os.path.exists(path):
+        os.makedirs(path)
+
+    fig.savefig(path + name, dpi=300, bbox_inches="tight", pad_inches=0.1)
+
+
+def _save_ani(
+    ani: matplotlib.animation.Animation, name: str, anim_freq: int = 10
+) -> None:
+    """
+    Save the animation.
+
+    Parameters
+    ----------
+    ani: matplotlib.animation.Animation
+        Animation to save.
+
+    name: str
+        Name of the file to save.
+
+    anim_freq: int, default=10
+        Frame rate of the animation.
+    """
+
+    path = "./animations/"
+    if not os.path.exists(path):
+        os.makedirs(path)
+
+    ani.save(
+        path + name,
+        writer="ffmpeg",
+        fps=anim_freq,
+    )

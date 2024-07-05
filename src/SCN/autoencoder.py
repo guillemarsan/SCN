@@ -46,6 +46,7 @@ class Autoencoder(Low_rank_LIF):
     --------
     >>> from SCN import Autoencoder
     >>> from SCN import Simulation
+    >>> net = Autoencoder.init_random(d=2, N=6)
     >>> net.plot()
     ...
     >>> sim = Simulation()
@@ -75,7 +76,7 @@ class Autoencoder(Low_rank_LIF):
     def __init__(
         self,
         D: np.ndarray,
-        T: int | float | np.ndarray | None = None,
+        T: int | float | np.ndarray = 0.5,
         lamb: float = 1,
         spike_scale: int | float | np.ndarray = 1,
     ) -> None:
@@ -87,8 +88,8 @@ class Autoencoder(Low_rank_LIF):
         D : ndarray of shape (do, N)
             Weights of the network. The columns need to be normalized.
 
-        T : ndarray of shape (N,)
-            Threshold of the neurons. If None, :math:`T_i = 1/2`.
+        T : int, float or ndarray of shape (N,), default = 0.5
+            Threshold of the neurons.
 
         lamb : float, default=1
             Leak timescale of the network.
@@ -111,9 +112,7 @@ class Autoencoder(Low_rank_LIF):
         F = D.T
         E = -D.T
 
-        if T is None:
-            T = 0.5
-        elif isinstance(T, (int, float)):
+        if isinstance(T, (int, float)):
             T = T * np.ones(D.shape[1])
 
         D = spike_scale * D
@@ -127,7 +126,7 @@ class Autoencoder(Low_rank_LIF):
         d: int = 2,
         N: int = 10,
         seed: int | None = None,
-        T: int | float | np.ndarray | None = None,
+        T: int | float | np.ndarray = 0.5,
         lamb: float = 1,
         spike_scale: int | float | np.ndarray = 1,
     ) -> Self:
@@ -146,8 +145,8 @@ class Autoencoder(Low_rank_LIF):
         seed : int or None, default=None
             Seed for the random number generator.
 
-        T : ndarray of shape (N,)
-            Threshold of the neurons. If None, :math:`T_i = 1/2`.
+        T : int, float or ndarray of shape (N,), default = 0.5
+            Threshold of the neurons.
 
         lamb : float, default=1
             Leak timescale of the network.
@@ -171,7 +170,7 @@ class Autoencoder(Low_rank_LIF):
         cls,
         d: int = 2,
         one_quadrant: bool = False,
-        T: int | float | np.ndarray | None = None,
+        T: int | float | np.ndarray = 0.5,
         lamb: float = 1,
         spike_scale: int | float | np.ndarray = 1,
     ) -> Self:
@@ -186,8 +185,8 @@ class Autoencoder(Low_rank_LIF):
         one_quadrant : bool, default=False
             If True, the weights are in the first quadrant.
 
-        T : ndarray of shape (N,)
-            Threshold of the neurons. If None, :math:`T_i = 1/2`.
+        T : int, float or ndarray of shape (N,), default = 0.5
+            Threshold of the neurons.
 
         lamb : float, default=1
             Leak timescale of the network.
@@ -211,7 +210,7 @@ class Autoencoder(Low_rank_LIF):
         cls,
         N: int = 10,
         angle_range: list | None = None,
-        T: int | float | np.ndarray | None = None,
+        T: int | float | np.ndarray = 0.5,
         lamb: float = 1,
         spike_scale: int | float | np.ndarray = 1,
     ) -> Self:
@@ -229,8 +228,8 @@ class Autoencoder(Low_rank_LIF):
         angle_range : list, default=None
             Range of angles for the neurons. If None, the range is :math:`[0, 2 \pi]`.
 
-        T : ndarray of shape (N,)
-            Threshold of the neurons. If None, :math:`T_i = 1/2`.
+        T : int, float or ndarray of shape (N,), default = 0.5
+            Threshold of the neurons.
 
         lamb : float, default=1
             Leak timescale of the network.
@@ -255,7 +254,7 @@ class Autoencoder(Low_rank_LIF):
         N: int = 10,
         angle_range: list | None = None,
         seed: int | None = None,
-        T: int | float | np.ndarray | None = None,
+        T: int | float | np.ndarray = 0.5,
         lamb: float = 1,
         spike_scale: int | float | np.ndarray = 1,
     ) -> Self:
@@ -276,8 +275,8 @@ class Autoencoder(Low_rank_LIF):
         seed : int or None, default=None
             Seed for the random number generator.
 
-        T : ndarray of shape (N,)
-            Threshold of the neurons. If None, :math:`T_i = 1/2`.
+        T : int, float or ndarray of shape (N,), default = 0.5
+            Threshold of the neurons.
 
         lamb : float, default=1
             Leak timescale of the network.

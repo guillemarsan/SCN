@@ -1,3 +1,4 @@
 *.pyc
 
 docs/build
+docs/source/references/_autosummary

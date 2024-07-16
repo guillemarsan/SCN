@@ -2,6 +2,8 @@ import matplotlib.axes
 import matplotlib.figure
 import numpy as np
 
+from .utils_plots import _get_colors, _line_closest_point
+
 
 class Low_rank_LIF:
     r"""
@@ -126,7 +128,6 @@ class Low_rank_LIF:
         ax: matplotlib.axes.Axes | None = None,
         x: np.ndarray | None = None,
         y: np.ndarray | None = None,
-        inverse: bool = False,
         save: bool = True,
     ) -> tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, list]:
         """
@@ -136,25 +137,130 @@ class Low_rank_LIF:
         ----------
 
         """
-        # TODO plot_LIF(self)
-
         ...
 
     def _animate(
         self,
         ax: matplotlib.axes.Axes,
+        artists: list,
         x: np.ndarray,
         y: np.ndarray,
-        artists: list,
-        spiking: np.ndarray,
-    ) -> None:
+        input_change: bool = False,
+        spiking: np.ndarray | None = None,
+    ) -> None: ...
+
+    def _draw_bbox_2D(
+        self,
+        centered: np.ndarray,
+        x0: np.ndarray,
+        ax: matplotlib.axes.Axes,
+        artists: list | None = None,
+    ) -> list:
         """
-        Animate the network.
+        Draw the bounding box visualization of the network.
 
         Parameters
         ----------
+        centered : ndarray of shape (2,)
+            Center of the bounding box.
+
+        x0 : ndarray of shape (di,)
+            Input of the network.
+
+        ax : matplotlib.axes.Axes
+            Axes to plot the network.
+
+        artists : list, default = None
+            List of artists to update the plot. If None, new artists are created.
+
+        Returns
+        -------
+        artists : list
+            List of artists to update the plot.
 
         """
 
-        # TODO animate_LIF(self)
-        return
+        first_frame = artists is None
+
+        if first_frame:
+            artists = []
+
+        colors = _get_colors(self.N, self.W)
+
+        def line_func(y1: np.ndarray, a: float, b: float, c: float) -> np.ndarray:
+            return (-a * y1 - c) / b
+
+        # TODO: Revisit where to center the plot
+        y1x = np.linspace(centered[0] - 1, centered[0] + 1, 100)
+        y2x = np.linspace(centered[1] - 1, centered[1] + 1, 100)
+        for n in range(self.N):
+            # TODO: This could be all that changes (a,b,c) so maybe this is where you need to separate
+            a = self.E[n, 0]
+            b = self.E[n, 1]
+            c = -self.T[n] + self.F[n, :] @ x0
+            yo = (
+                line_func(y1x, a, b, c)
+                if np.abs(a) < np.abs(b)
+                else line_func(y2x, b, a, c)
+            )
+            y1 = y1x if np.abs(a) < np.abs(b) else yo
+            y2 = yo if np.abs(a) < np.abs(b) else y2x
+
+            # polygon (to optimize: no redraw)
+            if not first_frame:
+                artists[n][0].remove()
+            if np.abs(a) < np.abs(b):
+                poly = ax.fill_between(
+                    y1,
+                    y2,
+                    y2=centered[1] + np.sign(b),
+                    color=colors[n],
+                    interpolate=True,
+                    alpha=0.2,
+                )
+            else:
+                poly = ax.fill_betweenx(
+                    y2,
+                    y1,
+                    x2=centered[0] + np.sign(a),
+                    color=colors[n],
+                    interpolate=True,
+                    alpha=0.2,
+                )
+            if not first_frame:
+                artists[n][0] = poly
+
+            # line
+            line = None
+            if first_frame:
+                line = ax.plot(y1, y2, linewidth=3, c=colors[n])[0]
+            else:
+                artists[n][1].set_xdata(y1)
+                artists[n][1].set_ydata(y2)
+
+            # quiver
+            quiver = None
+            q0, q1 = _line_closest_point(centered[0], centered[1], a, b, c)
+            if first_frame:
+                quiver = ax.quiver(
+                    q0,
+                    q1,
+                    self.D[0, n],
+                    self.D[1, n],
+                    color=colors[n],
+                    scale=5,
+                    scale_units="xy",
+                    angles="xy",
+                )
+            else:
+                artists[n][2].set_offsets([q0, q1])
+                artists[n][2].set_UVC(self.D[0, n], self.D[1, n])
+
+            if first_frame:
+                artists.append([poly, line, quiver])
+
+        ax.set_xlim(centered[0] - 1, centered[0] + 1)
+        ax.set_ylim(centered[1] - 1, centered[1] + 1)
+        ax.set_aspect("equal")
+
+        return artists

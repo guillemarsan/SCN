@@ -4,6 +4,7 @@ import matplotlib.animation
 import matplotlib.axes
 import matplotlib.colors as colors
 import matplotlib.figure
+import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.collections import LineCollection
 
@@ -76,40 +77,6 @@ def _line_closest_point(x0: float, y0: float, a: float, b: float, c: float):
     return x, y
 
 
-def _trick_axis(ax: matplotlib.axes.Axes, x0: np.ndarray) -> None:
-    """
-    Move the axis so the (0,0) is at x0.
-
-    Parameters
-    ----------
-    ax: matplotlib.axes.Axes
-        Axis object to modify.
-
-    x0: np.ndarray (2,)
-        Point to move the (0,0) to.
-    """
-    # Axis ticks
-    lm = np.ceil((x0[0] - 1) / 0.25) * 0.25
-    nxticks = (
-        np.arange(lm, lm + 2, 0.25)
-        if (x0[0] - 1) % 0.25 != 0
-        else np.arange(lm, lm + 2.0001, 0.25)
-    )
-    xticks = nxticks - x0[0]
-    ax.set_xticks(xticks)
-    ax.set_xticklabels(nxticks)
-
-    lm = np.ceil((x0[1] - 1) / 0.25) * 0.25
-    nyticks = (
-        np.arange(lm, lm + 2, 0.25)
-        if (x0[1] - 1) % 0.25 != 0
-        else np.arange(lm, lm + 2.0001, 0.25)
-    )
-    yticks = nyticks - x0[1]
-    ax.set_yticks(yticks)
-    ax.set_yticklabels(nyticks)
-
-
 def _save_fig(fig: matplotlib.figure.Figure, name: str) -> None:
     """
     Save the figure.
@@ -152,8 +119,53 @@ def _save_ani(
     if not os.path.exists(path):
         os.makedirs(path)
 
+    # TODO: make the path relative
+    plt.rcParams["animation.ffmpeg_path"] = "/Program Files/ffmpeg/bin/ffmpeg"
     ani.save(
         path + name,
         writer="ffmpeg",
         fps=anim_freq,
     )
+
+
+def _get_colors(N: int, W: np.ndarray) -> list:
+    """
+    Get the colors for the neurons.
+
+    Non-daleian: cycling default colors
+    Daelian: cool for I, hot for E
+
+    Parameters
+    ----------
+    N: int
+        Number of neurons.
+
+    W: np.ndarray (N, N)
+        Synaptic weights.
+
+    Returns
+    -------
+    colors: list
+        List of colors for the neurons.
+    """
+
+    excitatory = np.all(W >= 0, axis=1)
+    inhibitory = np.all(W <= 0, axis=1)
+
+    daleian = np.all(np.logical_or(excitatory, inhibitory))
+
+    if daleian:
+        cmapI = plt.get_cmap("winter")
+        cmapE = plt.get_cmap("autumn")
+
+        colors = [0] * N
+        exc_idx = np.argwhere(excitatory).flatten()
+        inh_idx = np.argwhere(inhibitory).flatten()
+        colorsI = [cmapI(i) for i in np.linspace(0, 1, len(inh_idx))]
+        colorsE = [cmapE(i) for i in np.linspace(0, 1, len(exc_idx))]
+        colors = [colorsI.pop(0) if i in inh_idx else colorsE.pop(0) for i in range(N)]
+    else:
+        cmap = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+        colors = [cmap[i % 10] for i in range(N)]
+
+    return colors

@@ -12,15 +12,16 @@ from matplotlib.animation import FuncAnimation
 
 from .autoencoder import Autoencoder
 from .low_rank_LIF import Low_rank_LIF
+from .single_population import Single_Population
 from .utils_neuro import (
     _deintegrate,
     _integrate,
     _neurons_spiked_between,
     _stimes_from_s,
 )
-from .utils_plots import _save_ani, _save_fig
+from .utils_plots import _get_colors, _save_ani, _save_fig
 
-available_plots = [[Autoencoder, 2, 2]]
+available_plots = [[Autoencoder, 2, 2], [Single_Population, 1, 2]]
 
 
 class Simulation:
@@ -177,10 +178,18 @@ class Simulation:
         if x is not None and c is not None:
             raise Warning("Both x and c provided, c will be used")
         elif x is not None:
-            assert x.shape[0] == net.di, "x first dimension should be equal to di"
-            assert (
-                x.shape[1] == time_steps
-            ), "x second dim. should be equal to time_steps"
+            if x.ndim == 2:
+                assert x.shape[0] == net.di, "x first dimension should be equal to di"
+                assert (
+                    x.shape[1] == time_steps
+                ), "x second dim. should be equal to time_steps"
+            elif x.ndim == 1:
+                if x.shape[0] == net.di:
+                    x = np.tile(x, (1, time_steps))
+                elif x.shape[0] == time_steps:
+                    x = np.tile(x, (net.di, 1))
+                else:
+                    raise ValueError("x should have either di or time_steps elements")
 
         if c is not None:
             assert c.shape[0] == net.di, "c first dimension should be equal to di"
@@ -206,7 +215,7 @@ class Simulation:
         if y0 is not None:
             if V0 is not None or r0 is not None:
                 raise Warning("y0 was given and prioritized over r0 and V0")
-            r0 = self.net.D @ y0
+            r0 = np.linalg.lstsq(self.net.D, y0, rcond=None)[0]
             V0 = self.net.F @ x[:, 0] + self.net.E @ y0 + I
         elif r0 is not None:
             if V0 is not None:
@@ -521,19 +530,31 @@ class Simulation:
         artists = []
         xaxis = np.linspace(0, x.shape[1] * self.dt, x.shape[1])
         cmap = plt.get_cmap("rainbow")
-        colorsio = [cmap(i) for i in np.linspace(0, 1, self.net.di)]
+        colorsio = [
+            cmap(i) for i in np.linspace(0, 1, np.maximum(self.net.di, self.net.do))
+        ]
 
+        linex_arr = []
         for i in range(self.net.di):
             linex = ax.plot(
                 xaxis, x[i, :], color=colorsio[i], label=f"x{i + 1}", alpha=0.5
             )[0]
+            linex_arr.append(linex)
+        artists.append(linex_arr)
+
+        liney_arr = []
+        for i in range(self.net.do):
             liney = ax.plot(xaxis, y[i, :], color=colorsio[i], label=f"y{i + 1}")[0]
-            artists.append([linex, liney])
+            liney_arr.append(liney)
+        artists.append(liney_arr)
 
         ax.set_ylabel("x(t)/y(t)")
         ax.set_xlabel("time (s)")
         ax.set_xlim(-0.5, self.Tmax + 0.5)
-        ax.set_ylim(np.min([self.y, self.x]) - 0.05, np.max([self.y, self.x]) + 0.05)
+        ax.set_ylim(
+            np.min([np.min(self.y), np.min(self.x)]) - 0.05,
+            np.max([np.max(self.y), np.max(self.x)]) + 0.05,
+        )
         ax.legend()
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
@@ -581,7 +602,8 @@ class Simulation:
 
         (stimes,) = self._crop(t, "stimes")
         artists = []
-        colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+
+        colors = _get_colors(self.net.N, self.net.W)
 
         scatter = ax.scatter(
             stimes[:, 1],
@@ -643,7 +665,7 @@ class Simulation:
 
         artists = []
         xaxis = np.linspace(0, r.shape[1] * self.dt, r.shape[1])
-        colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+        colors = _get_colors(self.net.N, self.net.W)
 
         for i in range(self.net.N):
             line = ax.plot(xaxis, r[i, :], color=colors[i], label=f"r{i + 1}")[0]
@@ -709,9 +731,7 @@ class Simulation:
 
         if geometry:
             x, y = self._crop(t=0, type="io")
-            _, _, artists_net = self.net.plot(
-                ax=ax4, x=x, y=y, inverse=True, save=False
-            )
+            _, _, artists_net = self.net.plot(ax=ax4, x=x, y=y, save=False)
             artists.append(artists_net)
 
         def flatten(l: list) -> list:
@@ -722,56 +742,57 @@ class Simulation:
             )
 
         artists_flatten = flatten(artists)
-        spiked = np.zeros(self.net.N, dtype=int)
 
         def init():
             return artists_flatten
 
         def update(frame, artists, artists_flatten):
             t = frame / anim_freq
+            tpast = (frame - 1) / anim_freq
+            tpastpast = (frame - 2) / anim_freq
 
             self._animate_io(artists=artists[0], t=t)
             self._animate_spikes(artists=artists[1], t=t)
             self._animate_rates(artists=artists[2], t=t)
 
-            return artists_flatten
+            if geometry:
+                x, y = self._crop(t, "io")
 
-        def update_geo(frame, artists, artists_flatten, spiked):
-            t = frame / anim_freq
+                newspiked = _neurons_spiked_between(self.stimes, tpast, t)
+                oldspiked = _neurons_spiked_between(self.stimes, tpastpast, tpast)
+                spiking = np.concatenate(
+                    [
+                        -(np.array(oldspiked, dtype=int) + 1),
+                        np.array(newspiked, dtype=int) + 1,
+                    ]
+                )
 
-            self._animate_io(artists=artists[0], t=t)
-            self._animate_spikes(artists=artists[1], t=t)
-            self._animate_rates(artists=artists[2], t=t)
+                input_change = (
+                    not np.array_equal(
+                        x[:, int(t / self.dt)], x[:, int(tpast / self.dt)]
+                    )
+                    if tpast >= 0
+                    else False
+                )
 
-            x, y = self._crop(t, "io")
-            newspiked = _neurons_spiked_between(self.stimes, (frame - 1) / anim_freq, t)
-            spiking = np.concatenate(
-                [
-                    -(np.argwhere(spiked).flatten() + 1),
-                    np.array(newspiked, dtype=int) + 1,
-                ]
-            )
-            spiked[:] = 0
-            spiked[newspiked] = 1
-            assert ax4 is not None
-            self.net._animate(ax=ax4, artists=artists[3], x=x, y=y, spiking=spiking)
+                assert ax4 is not None
+                self.net._animate(
+                    ax=ax4,
+                    artists=artists[3],
+                    x=x,
+                    y=y,
+                    input_change=input_change,
+                    spiking=spiking,
+                )
+
             return artists_flatten
 
         anim_freq = 10
         frames = self.Tmax * anim_freq
-        func = (
-            partial(update, artists=artists, artists_flatten=artists_flatten)
-            if not geometry
-            else partial(
-                update_geo,
-                artists=artists,
-                artists_flatten=artists_flatten,
-                spiked=spiked,
-            )
-        )
+
         ani = FuncAnimation(
             fig,
-            func=func,
+            func=partial(update, artists=artists, artists_flatten=artists_flatten),
             frames=np.arange(0, frames),
             init_func=init,
             blit=True,
@@ -796,10 +817,12 @@ class Simulation:
         x, y = self._crop(t, "io")
         xaxis = np.linspace(0, x.shape[1] * self.dt, x.shape[1])
         for i in range(self.net.di):
-            artists[i][0].set_xdata(xaxis)
-            artists[i][0].set_ydata(x[i, :])
-            artists[i][1].set_xdata(xaxis)
-            artists[i][1].set_ydata(y[i, :])
+            artists[0][i].set_xdata(xaxis)
+            artists[0][i].set_ydata(x[i, :])
+
+        for i in range(self.net.do):
+            artists[1][i].set_xdata(xaxis)
+            artists[1][i].set_ydata(y[i, :])
 
     def _animate_spikes(self, artists: list, t: float) -> None:
         """
@@ -815,7 +838,7 @@ class Simulation:
             Time to crop the spikes. For the frames of the animation.
         """
 
-        colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+        colors = _get_colors(self.net.N, self.net.W)
         (stimes,) = self._crop(t, "stimes")
         artists[0].set_facecolor([colors[int(val)] for val in stimes[:, 0]])
         artists[0].set_offsets(stimes[:, ::-1])
@@ -867,18 +890,18 @@ class Simulation:
 
         if t == -1:
             t = self.Tmax
-        frame = int(t / self.dt)
+        time_step = int(t / self.dt)
 
         match type:
             case "io":
-                x = self.x[:, : frame + 1]
-                y = self.y[:, : frame + 1]
+                x = self.x[:, : time_step + 1]
+                y = self.y[:, : time_step + 1]
                 return x, y
             case "stimes":
                 stimes = self.stimes[np.where(self.stimes[:, 1] <= t)]
                 return (stimes,)
             case "rates":
-                r = self.r[:, : frame + 1]
+                r = self.r[:, : time_step + 1]
                 return (r,)
             case _:
                 raise ValueError("type should be 'io', 'stimes' or 'rates'")

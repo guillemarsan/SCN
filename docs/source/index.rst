@@ -8,13 +8,3 @@ Welcome to SCN's documentation!
 
    welcome
    references/index
-
-
-
-
-Indices and tables
-==================
-
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`

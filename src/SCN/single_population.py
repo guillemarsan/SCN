@@ -194,6 +194,140 @@ class Single_Population(Low_rank_LIF):
         T = T - E[:, 1]
         return cls(F=F, E=E, D=D, T=T, lamb=lamb)
 
+    @classmethod
+    def init_2D_spaced(
+        cls,
+        di: int = 1,
+        N: int = 10,
+        dale: str = "I",
+        angle_range: list | None = None,
+        T: int | float | np.ndarray = 0.5,
+        lamb: float = 1,
+        spike_scale: int | float | np.ndarray = 1,
+    ) -> Self:
+        r"""
+        Regularly spaced 2D initialization of the Single_Population network.
+
+        :math:`N` neurons spaced regularly between `angle_range[0]` and `angle_range[1]`.
+        The encoders are :math:`\mathbf{E}_i = (\cos(\alpha_i), \sin(\alpha_i))`.
+
+        Parameters
+        ----------
+
+        di: int, default=1
+            Input dimensions.
+
+        N: int, default=10
+            Number of neurons.
+
+        dale : str, default="I"
+            Dale's law of the network. "I" for inhibitory, "E" for excitatory.
+
+        angle_range : list, default=None
+            Range of angles for the neurons. If None, the range is :math:`[\pi/4, 3\pi/4]`.
+
+        T : int, float or ndarray of shape (N,), default = 0.5
+            Threshold of the neurons.
+
+        lamb : float, default=1
+            Leak timescale of the network.
+
+        spike_scale : int, float or ndarray, default=1
+            Scale of the spikes.
+
+        Returns
+        -------
+        net: Single_Population
+            Single_Population network with regularly spaced latent boundary.
+        """
+
+        if angle_range is None:
+            angle_range = [np.pi / 4, 3 * np.pi / 4]
+
+        assert np.abs(angle_range[1] - angle_range[0]) <= np.pi / 2
+        # evenly spaced circular parameters
+        E = boundary._2D_circle_spaced(N=N, angle_range=angle_range)
+
+        D = -E.T if dale == "I" else E.T
+        D = spike_scale * D
+
+        F_scale = 0.1
+        E_scale = np.sqrt(1 - F_scale**2)
+        F = F_scale * np.random.choice([-1, 1], (N, di))
+        E = E_scale * E / np.linalg.norm(E, axis=1)[:, np.newaxis]
+
+        T = T - E[:, 1]
+        return cls(F, E, D, T, lamb)
+
+    @classmethod
+    def init_2D_random(
+        cls,
+        di: int = 1,
+        N: int = 10,
+        dale: str = "I",
+        angle_range: list | None = None,
+        seed: int | None = None,
+        T: int | float | np.ndarray = 0.5,
+        lamb: float = 1,
+        spike_scale: int | float | np.ndarray = 1,
+    ) -> Self:
+        r"""
+        Randomly spaced 2D initialization of the Single_Population network.
+
+        :math:`N` neurons spaced randomly between `angle_range[0]` and `angle_range[1]`.
+        The decoders are :math:`\mathbf{E}_i = (\cos(\alpha_i), \sin(\alpha_i))`.
+
+        Parameters
+        ----------
+
+        di: int, default=1
+            Input dimensions.
+
+        N: int, default=10
+            Number of neurons.
+
+        dale : str, default="I"
+            Dale's law of the network. "I" for inhibitory, "E" for excitatory.
+
+        angle_range : list, default=None
+            Range of angles for the neurons. If None, the range is :math:`[\pi/4, 3\pi/4]`.
+
+        seed : int or None, default=None
+            Seed for the random number generator.
+
+        T : int, float or ndarray of shape (N,), default = 0.5
+            Threshold of the neurons.
+
+        lamb : float, default=1
+            Leak timescale of the network.
+
+        spike_scale : int, float or ndarray, default=1
+            Scale of the spikes.
+
+        Returns
+        -------
+        net: Single_Population
+            Single_Population network with randomly spaced latent boundary.
+        """
+
+        if angle_range is None:
+            angle_range = [np.pi / 4, 3 * np.pi / 4]
+
+        assert np.abs(angle_range[1] - angle_range[0]) <= np.pi / 2
+        # evenly spaced circular parameters
+        E = boundary._2D_circle_random(N=N, angle_range=angle_range, seed=seed)
+
+        D = -E.T if dale == "I" else E.T
+        D = spike_scale * D
+
+        F_scale = 0.1
+        E_scale = np.sqrt(1 - F_scale**2)
+        F = F_scale * np.random.choice([-1, 1], (N, di))
+        E = E_scale * E / np.linalg.norm(E, axis=1)[:, np.newaxis]
+
+        T = T - E[:, 1]
+        return cls(F, E, D, T, lamb)
+
     def plot(
         self,
         ax: matplotlib.axes.Axes | None = None,

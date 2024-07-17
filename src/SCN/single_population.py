@@ -131,9 +131,14 @@ class Single_Population(Low_rank_LIF):
         lamb: float = 1,
     ) -> Self:
         r"""
-        TODO: Add description
+
         Random initialization of the Single Population network.
         (see :func:`~SCN.boundary._sphere_random`)
+
+        Characteristics:
+        - :math:`(\mathbf{F}|\mathbf{E})` initialized randomly in a hemisphere of radius 1 in :math:`\mathbb{R}^{d_i+d_o}`
+        - :math:`\mathbf{D}` as close to :math:`\pm E^\top` while respecting EI
+        - :math:`\mathbf{T} = \mathbf{T} - \mathbf{E}_N` to center the boundary at :math:`(0, 0, ..., -1)`
 
         Parameters
         ----------
@@ -171,7 +176,7 @@ class Single_Population(Low_rank_LIF):
         E = M[di:, :].T
 
         # standarize in semi-sphere
-        E[:, -1] = np.sign(E[:, -1]) * E[:, -1]
+        E[:, -1] = np.abs(E[:, -1])
 
         # find D that respects E/I
         D = cp.Variable((do, N))

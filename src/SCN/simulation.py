@@ -11,6 +11,7 @@ import numpy as np
 from matplotlib.animation import FuncAnimation
 
 from .autoencoder import Autoencoder
+from .ei_network import EI_Network
 from .low_rank_LIF import Low_rank_LIF
 from .single_population import Single_Population
 from .utils_neuro import (
@@ -21,7 +22,7 @@ from .utils_neuro import (
 )
 from .utils_plots import _get_colors, _save_ani, _save_fig
 
-available_plots = [[Autoencoder, 2, 2], [Single_Population, 1, 2]]
+available_plots = [[Autoencoder, 2, 2], [Single_Population, 1, 2], [EI_Network, 1, 2]]
 
 
 class Simulation:
@@ -145,6 +146,8 @@ class Simulation:
             How to choose the neuron to spike in case draw_break='slowmo' or 'one':
             - 'max': neuron with the highest voltage spikes
             - 'rand': neuron is chosen randomly
+            - 'inh_max': neuron with the highest voltage spikes (all inhibitory priority)
+            - 'inh_rand': neuron is chosen randomly (all inhibitory priority)
 
         dt : float, default=0.001
             Time step of the simulation (s).
@@ -386,8 +389,9 @@ class Simulation:
 
         for t in range(time_steps - 1):
             candidates = np.where(V[:, t] > self.net.T)[0]
-            idx = self._idx_choose(V[:, t], candidates)
-            s[idx, t] = 1
+            if len(candidates) > 0:
+                idx = self._idx_choose(V[:, t], candidates)
+                s[idx, t] = 1
 
             V[:, t + 1] = (
                 V[:, t]
@@ -417,11 +421,30 @@ class Simulation:
         idx : int
             Index of the neuron to spike.
         """
-        idx = int(
-            np.argmax(V - self.net.T)
-            if self.criterion == "max"
-            else np.random.choice(candidates)
-        )
+
+        match self.criterion:
+            case "max":
+                idx = int(np.argmax(V - self.net.T))
+            case "rand":
+                idx = np.random.choice(candidates)
+            case "inh_max":
+                inh = np.all(self.net.W < 0, axis=0)
+                if np.any(inh[candidates]):
+                    inhidx = np.where(inh)[0]
+                    idx = int(np.argmax(V[inhidx] - self.net.T[inhidx]))
+                else:
+                    idx = int(np.argmax(V - self.net.T))
+            case "inh_rand":
+                inh = np.all(self.net.W < 0, axis=0)
+                if np.any(inh[candidates]):
+                    inhidx = np.where(inh)[0]
+                    idx = np.random.choice(inhidx)
+                else:
+                    idx = np.random.choice(candidates)
+            case _:
+                raise ValueError(
+                    "criterion should be 'max', 'rand', 'inh_max' or 'inh_rand'"
+                )
         return idx
 
     # PLOTTING ####

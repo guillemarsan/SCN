@@ -217,6 +217,7 @@ class Low_rank_LIF:
                     color=colors[n],
                     interpolate=True,
                     alpha=0.2,
+                    zorder=n,
                 )
             else:
                 poly = ax.fill_betweenx(
@@ -226,6 +227,7 @@ class Low_rank_LIF:
                     color=colors[n],
                     interpolate=True,
                     alpha=0.2,
+                    zorder=n,
                 )
             if not first_frame:
                 artists[n][0] = poly
@@ -233,7 +235,7 @@ class Low_rank_LIF:
             # line
             line = None
             if first_frame:
-                line = ax.plot(y1, y2, linewidth=3, c=colors[n])[0]
+                line = ax.plot(y1, y2, linewidth=3, c=colors[n], zorder=n)[0]
             else:
                 artists[n][1].set_xdata(y1)
                 artists[n][1].set_ydata(y2)
@@ -251,10 +253,12 @@ class Low_rank_LIF:
                     scale=5,
                     scale_units="xy",
                     angles="xy",
+                    zorder=n,
                 )
             else:
                 artists[n][2].set_offsets([q0, q1])
                 artists[n][2].set_UVC(self.D[0, n], self.D[1, n])
+                artists[n][2].set_zorder(n)
 
             if first_frame:
                 artists.append([poly, line, quiver])

@@ -109,6 +109,7 @@ class Single_Population(Low_rank_LIF):
 
         # assert EI
         W = E @ D
+        W[np.argwhere(np.abs(W) < 1e-10)] = 0
         assert np.all(W <= 0) or np.all(
             W >= 0
         ), "W should be either positive (E) or negative (I)"
@@ -172,8 +173,8 @@ class Single_Population(Low_rank_LIF):
         # random boundary
         M = boundary._sphere_random(d=di + do, N=N, seed=seed)
 
-        F = M[:di, :].T
-        E = M[di:, :].T
+        F = M[:, :di]
+        E = M[:, di:]
 
         # standarize in semi-sphere
         E[:, -1] = np.abs(E[:, -1])
@@ -184,7 +185,7 @@ class Single_Population(Low_rank_LIF):
         prob = cp.Problem(
             cp.Minimize(penalty), [E @ D <= 0 if dale == "I" else E @ D >= 0]
         )
-        prob.solve()
+        prob.solve(cp.SCS, eps_abs=1e-9, eps_rel=0)
         if prob.status != cp.OPTIMAL:
             raise ValueError("Problem not feasible")
         else:

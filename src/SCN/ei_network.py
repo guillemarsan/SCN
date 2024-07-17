@@ -103,6 +103,7 @@ class EI_Network(Low_rank_LIF):
 
         # assert EI
         W = E @ D
+        W[np.argwhere(np.abs(W) < 1e-10)] = 0
         excitatory = np.all(W >= 0, axis=0)
         inhibitory = np.all(W <= 0, axis=0)
 
@@ -170,8 +171,8 @@ class EI_Network(Low_rank_LIF):
         # random boundary
         M = boundary._sphere_random(d=di + do, N=N, seed=seed)
 
-        F = M[:di, :].T
-        E = M[di:, :].T
+        F = M[:, :di]
+        E = M[:, di:]
 
         # standarize in semi-sphere
         E[:, -2:] = np.abs(E[:, -2:])
@@ -185,7 +186,7 @@ class EI_Network(Low_rank_LIF):
             cp.Minimize(penalty),
             [D.T[:NI, :] @ E.T <= 0, D.T[NI:, :] @ E.T >= 0],
         )
-        prob.solve(cp.SCS)
+        prob.solve(cp.SCS, eps_abs=1e-9, eps_rel=0)
         if prob.status != cp.OPTIMAL:
             raise ValueError("Problem not feasible")
         else:

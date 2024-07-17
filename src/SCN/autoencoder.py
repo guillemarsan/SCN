@@ -163,7 +163,7 @@ class Autoencoder(Low_rank_LIF):
         """
 
         # random parameters
-        D = boundary._sphere_random(d=d, N=N, seed=seed)
+        D = -boundary._sphere_random(d=d, N=N, seed=seed).T
 
         return cls(D, T, lamb, spike_scale)
 
@@ -203,7 +203,7 @@ class Autoencoder(Low_rank_LIF):
         """
 
         # hypercube parameters
-        D = boundary._cube(d=d, one_quadrant=one_quadrant)
+        D = -boundary._cube(d=d, one_quadrant=one_quadrant).T
 
         return cls(D, T, lamb, spike_scale)
 
@@ -246,7 +246,7 @@ class Autoencoder(Low_rank_LIF):
         """
 
         # evenly spaced circular parameters
-        D = boundary._2D_circle_spaced(N=N, angle_range=angle_range)
+        D = -boundary._2D_circle_spaced(N=N, angle_range=angle_range).T
 
         return cls(D, T, lamb, spike_scale)
 
@@ -293,7 +293,7 @@ class Autoencoder(Low_rank_LIF):
         """
 
         # randomly spaced circular parameters
-        D = boundary._2D_circle_random(N=N, angle_range=angle_range, seed=seed)
+        D = -boundary._2D_circle_random(N=N, angle_range=angle_range, seed=seed).T
 
         return cls(D, T, lamb, spike_scale)
 

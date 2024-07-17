@@ -3,7 +3,7 @@ import numpy as np
 
 def _sphere_random(d: int = 2, N: int = 10, seed: int | None = None) -> np.ndarray:
     r"""
-    Generate a matrix :math:`d \times N` with `N` unitary vectors in `d`-dim. space.
+    Generate a matrix :math:`N \times d` with `N` unitary vectors in `d`-dim. space.
 
     Parameters
     ----------
@@ -18,7 +18,7 @@ def _sphere_random(d: int = 2, N: int = 10, seed: int | None = None) -> np.ndarr
 
     Returns
     -------
-    M: np.ndarray of float(d, N)
+    M: np.ndarray of float(N, d)
         Matrix with :math:`N` unitary vectors in :math:`d`-dim. space.
     """
 
@@ -26,15 +26,15 @@ def _sphere_random(d: int = 2, N: int = 10, seed: int | None = None) -> np.ndarr
         np.random.seed(seed)
 
     # random parameters
-    M = np.random.randn(d, N)
-    M = M / np.linalg.norm(M, axis=0)
+    M = np.random.randn(N, d)
+    M = M / np.linalg.norm(M, axis=1)[:, np.newaxis]
 
     return M
 
 
 def _cube(d: int = 2, one_quadrant: bool = False) -> np.ndarray:
     r"""
-    Generate a matrix :math:`d \times N` with `N` unitary vectors forming a hyper-cube in `d`-dim. space.
+    Generate a matrix :math:`N \times d` with `N` unitary vectors forming a hyper-cube in `d`-dim. space.
     If `one_quadrant` is True, the vectors are in the first quadrant (the axis).
     `N = 2d` for `one_quadrant = False` and `N = d` for `one_quadrant = True`.
 
@@ -48,14 +48,14 @@ def _cube(d: int = 2, one_quadrant: bool = False) -> np.ndarray:
 
     Returns
     -------
-    M: np.ndarray of float(d, N)
+    M: np.ndarray of float(N, d)
         Matrix with :math:`N` unitary vectors in :math:`d`-dim. space.
     """
 
     # hypercube parameters
-    M = np.eye(d)
+    M = -np.eye(d)
     if not one_quadrant:
-        M = np.hstack([M, -M])
+        M = np.vstack([M, -M])
 
     return M
 
@@ -64,10 +64,10 @@ def _2D_circle_random(
     N: int = 10, angle_range: list | None = None, seed: float | None = None
 ) -> np.ndarray:
     r"""
-    Generate a matrix :math:`2 \times N` with `N` unitary vectors randomly spaced forming a circle in 2D.
+    Generate a matrix :math:`N \times 2` with `N` unitary vectors randomly spaced forming a circle in 2D.
 
     :math:`N` vectors spaced randomly between `angle_range[0]` and `angle_range[1]`.
-    The vectors are :math:`\mathbf{D}_i = (-\cos(\alpha_i), -\sin(\alpha_i))`.
+    The vectors are :math:`\mathbf{M}_i = (\cos(\alpha_i), \sin(\alpha_i))`.
 
     Parameters
     ----------
@@ -82,7 +82,7 @@ def _2D_circle_random(
 
     Returns
     -------
-    M: np.ndarray of float(2, N)
+    M: np.ndarray of float(N, 2)
         Matrix with :math:`N` unitary vectors in 2D space.
     """
 
@@ -94,7 +94,7 @@ def _2D_circle_random(
 
     # randomly spaced circular parameters
     alphas = np.random.uniform(angle_range[0], angle_range[1], N)
-    M = np.array([-np.cos(alphas), -np.sin(alphas)])
+    M = np.array([np.cos(alphas), np.sin(alphas)]).T
 
     return M
 
@@ -130,6 +130,6 @@ def _2D_circle_spaced(N: int = 10, angle_range: list | None = None) -> np.ndarra
         N,
         endpoint=(angle_range[1] - angle_range[0]) % (2 * np.pi) != 0,
     )
-    M = np.array([-np.cos(alphas), -np.sin(alphas)])
+    M = np.array([np.cos(alphas), np.sin(alphas)]).T
 
     return M

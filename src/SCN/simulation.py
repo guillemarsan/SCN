@@ -428,17 +428,17 @@ class Simulation:
             case "rand":
                 idx = np.random.choice(candidates)
             case "inh_max":
-                inh = np.all(self.net.W < 0, axis=0)
-                if np.any(inh[candidates]):
-                    inhidx = np.where(inh)[0]
-                    idx = int(np.argmax(V[inhidx] - self.net.T[inhidx]))
+                inh = np.argwhere(np.all(self.net.W < 0, axis=0)).flatten()
+                inh_cand = np.intersect1d(candidates, inh)
+                if len(inh_cand) > 0:
+                    idx = int(np.argmax(V[inh_cand] - self.net.T[inh_cand]))
                 else:
                     idx = int(np.argmax(V - self.net.T))
             case "inh_rand":
-                inh = np.all(self.net.W < 0, axis=0)
-                if np.any(inh[candidates]):
-                    inhidx = np.where(inh)[0]
-                    idx = np.random.choice(inhidx)
+                inh = np.argwhere(np.all(self.net.W < 0, axis=0)).flatten()
+                inh_cand = np.intersect1d(candidates, inh)
+                if len(inh_cand) > 0:
+                    idx = np.random.choice(inh_cand)
                 else:
                     idx = np.random.choice(candidates)
             case _:

@@ -146,7 +146,7 @@ class Single_Population(Low_rank_LIF):
         di : float, default=2
             Input dimensions.
 
-        d0: float, default=2
+        do: float, default=2
             Output dimensions.
 
         N : float, default=10

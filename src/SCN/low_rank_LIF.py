@@ -265,6 +265,8 @@ class Low_rank_LIF:
 
         ax.set_xlim(centered[0] - 1, centered[0] + 1)
         ax.set_ylim(centered[1] - 1, centered[1] + 1)
+        ax.set_ylabel("y2")
+        ax.set_xlabel("y1")
         ax.set_aspect("equal")
 
         return artists

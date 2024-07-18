@@ -362,6 +362,8 @@ class Autoencoder(Low_rank_LIF):
             if y is not None:
                 artists_y = plot._plot_traj(ax, y, gradient=True)
                 artists.append(artists_y)
+                artists_leak = plot._plot_vector(ax, y[:, -1], -y[:, -1])
+                artists.append(artists_leak)
         else:
             raise NotImplementedError("Only 2D Autoencoder vis. is implemented for now")
 
@@ -409,7 +411,8 @@ class Autoencoder(Low_rank_LIF):
         centered = x[:, 0] - x[:, -1]
         yinv = y + centered[:, np.newaxis]
 
-        plot._animate_traj(ax, artists[-1], yinv)
+        plot._animate_traj(ax, artists[-2], yinv)
+        plot._animate_vector(artists[-1], yinv[:, -1], -1 * yinv[:, -1])
         if spiking is not None:
             plot._animate_spiking(artists, spiking)
         if input_change:

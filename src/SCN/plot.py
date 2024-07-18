@@ -1,4 +1,5 @@
 import matplotlib.axes
+import matplotlib.quiver
 import numpy as np
 
 from .utils_plots import _gradient_line
@@ -47,6 +48,43 @@ def _plot_traj(
     return artists
 
 
+def _plot_vector(
+    ax: matplotlib.axes.Axes, point: np.ndarray, vector: np.ndarray
+) -> matplotlib.quiver.Quiver:
+    """
+    Plot a vector.
+
+    Parameters
+    ----------
+    ax: matplotlib.axes.Axes
+        Axis to plot the vector.
+
+    point: np.ndarray (2,)
+        Point to start the vector.
+
+    vector: np.ndarray (2,)
+        Vector to plot.
+
+    Returns
+    -------
+    artists: matplotlib.quiver.Quiver
+        Artists to update the plot.
+    """
+
+    arrow = ax.quiver(
+        point[0],
+        point[1],
+        vector[0],
+        vector[1],
+        scale=9,
+        scale_units="xy",
+        color="grey",
+        alpha=0.4,
+    )
+
+    return arrow
+
+
 def _animate_traj(
     ax: matplotlib.axes.Axes,
     artists: list,
@@ -86,6 +124,28 @@ def _animate_traj(
         artists[1].set_xdata(traj[0, :])
         artists[1].set_ydata(traj[1, :])
         artists[2].set_offsets(traj[:, -1])
+
+
+def _animate_vector(
+    artists: matplotlib.quiver.Quiver, point: np.ndarray, vector: np.ndarray
+) -> None:
+    """
+    Animate a vector.
+
+    Parameters
+    ----------
+    artists: matplotlib.quiver.Quiver
+        Artists to update the plot.
+
+    point: np.ndarray (2,)
+        Point to start the vector.
+
+    vector: np.ndarray (2,)
+        Vector to plot.
+    """
+
+    artists.set_offsets([point[0], point[1]])
+    artists.set_UVC(vector[0], vector[1])
 
 
 def _animate_spiking(

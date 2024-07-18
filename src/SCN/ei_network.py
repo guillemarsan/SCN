@@ -413,6 +413,8 @@ class EI_Network(Low_rank_LIF):
             if y is not None:
                 artists_y = plot._plot_traj(ax, y, gradient=True)
                 artists.append(artists_y)
+                artists_leak = plot._plot_vector(ax, y[:, -1], -y[:, -1])
+                artists.append(artists_leak)
         else:
             raise NotImplementedError("Only 2D Latents vis. is implemented for now")
 
@@ -457,7 +459,8 @@ class EI_Network(Low_rank_LIF):
             Neurons spiking in this frame. Index starting at 1. -n if the neuron needs to be restored.
         """
 
-        plot._animate_traj(ax, artists[-1], y)
+        plot._animate_traj(ax, artists[-2], y)
+        plot._animate_vector(artists[-1], y[:, -1], -y[:, -1])
         if spiking is not None:
             plot._animate_spiking(artists, spiking)
         if input_change:

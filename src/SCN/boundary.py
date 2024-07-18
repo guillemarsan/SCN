@@ -1,3 +1,4 @@
+import cvxpy as cp
 import numpy as np
 
 
@@ -133,3 +134,62 @@ def _2D_circle_spaced(N: int = 10, angle_range: list | None = None) -> np.ndarra
     M = np.array([np.cos(alphas), np.sin(alphas)]).T
 
     return M
+
+
+def _dale_decoder_ortho(
+    E: np.ndarray, NE: int, NI: int, optim=True, latent_sep=None
+) -> np.ndarray:
+    r"""
+    Compute the decoder matrix for a EI network.
+
+    Parameters
+    ----------
+    E : np.ndarray of float(do, N)
+        Encoding matrix.
+
+    NE : int
+        Number of excitatory neurons.
+
+    NI : int
+        Number of inhibitory neurons.
+
+    optim : bool, default=True
+        If True, the optimization is performed. If False, :math:`\mathbf{D} = \pm \mathbf{E}^\top` (you need to make sure
+        this does not violate daliean constraints)
+
+    latent_sep : np.ndarray of bool(do, 2), default=None
+        If not None, the latent space is separated in excitatory and inhibitory dimensions, according to the matric.
+    """
+
+    if not optim and latent_sep is not None:
+        raise Warning("The latent_sep parameter is ignored when optim=False")
+
+    N = NE + NI
+    do = E.shape[1]
+    EIvec = np.ones(N)
+    EIvec[:NI] = -1
+    mask = np.zeros((do, N), dtype=bool)
+
+    if optim:
+        if latent_sep is not None:
+            for d_id in range(do):
+                if not latent_sep[d_id, 0]:
+                    mask[d_id, NI:] = True
+                if not latent_sep[d_id, 1]:
+                    mask[d_id, :NI] = True
+
+        D = cp.Variable((do, N))
+        penalty = cp.norm(D - EIvec * E.T)
+        constraints = [D.T[:NI, :] @ E.T <= 0, D.T[NI:, :] @ E.T >= 0]
+        if np.any(mask):
+            constraints += [D[mask] == 0]
+        prob = cp.Problem(cp.Minimize(penalty), constraints)  # type: ignore
+        prob.solve(cp.SCS, eps_abs=1e-9, eps_rel=0)
+        if prob.status != cp.OPTIMAL:
+            raise ValueError("Problem not feasible")
+        else:
+            D = D.value
+    else:
+        D = EIvec * E.T
+
+    return D

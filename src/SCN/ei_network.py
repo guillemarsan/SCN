@@ -1,7 +1,6 @@
 import time
 from typing import Self
 
-import cvxpy as cp
 import matplotlib.axes
 import matplotlib.figure
 import matplotlib.pyplot as plt
@@ -98,7 +97,7 @@ class EI_Network(Low_rank_LIF):
 
         assert all(np.abs(np.linalg.norm(np.hstack([F, E]), axis=1) - 1) < 1e-10), (
             "The rows of (F|E) need to be normalized, if you want to change the boundary"
-            + "use T, if you want to change the spike size use D"
+            + " use T, if you want to change the spike size use D"
         )
 
         # assert EI
@@ -127,6 +126,7 @@ class EI_Network(Low_rank_LIF):
         seed: int | None = None,
         T: int | float | np.ndarray = 0.5,
         lamb: float = 1,
+        latent_sep: np.ndarray | None = None,
     ) -> Self:
         r"""
         Random initialization of the EI Network.
@@ -135,7 +135,7 @@ class EI_Network(Low_rank_LIF):
         Characteristics:
         - :math:`(\mathbf{F}|\mathbf{E})` initialized randomly in a hemihemisphere of radius 1 in :math:`\mathbb{R}^{d_i+d_o}`
         - :math:`\mathbf{D}` as close to :math:`\pm E^\top` while respecting EI
-        - :math:`\mathbf{T} = \mathbf{T} - \mathbf{E}_N` to center the boundary at :math:`(0, 0, ..., -1)`
+        - :math:`\mathbf{T} = \mathbf{T} - \mathbf{E}_N` to center the boundary at :math:`(0, 0, ..., 0, 1, -1)`
 
         Parameters
         ----------
@@ -160,6 +160,10 @@ class EI_Network(Low_rank_LIF):
         lamb : float, default=1
             Leak timescale of the network.
 
+        latent_sep : ndarray(bool) of shape (do, 2), default=None
+            If not None, the latent dimensions are separated. The first (second) column is True if the latent dimension is influenced
+            by excitatory (inhibitory) neurons.
+
         Returns
         -------
         net: Autoencoder
@@ -177,23 +181,12 @@ class EI_Network(Low_rank_LIF):
         # standarize in semi-sphere
         E[:, -2:] = np.abs(E[:, -2:])
 
-        # find D that respects E/I
-        EIvec = np.ones(N)
-        EIvec[:NI] = -1
-        D = cp.Variable((do, N))
-        penalty = cp.norm(D - EIvec * E.T)
-        prob = cp.Problem(
-            cp.Minimize(penalty),
-            [D.T[:NI, :] @ E.T <= 0, D.T[NI:, :] @ E.T >= 0],
-        )
-        prob.solve(cp.SCS, eps_abs=1e-9, eps_rel=0)
-        if prob.status != cp.OPTIMAL:
-            raise ValueError("Problem not feasible")
-        else:
-            D = D.value
+        # find D that respects E/I and latent constraints
+        D = boundary._dale_decoder_ortho(E, NE, NI, latent_sep=latent_sep)
 
         # TODO: take this to I
-        T = T - E[:, 1]
+        # T = T - E[:, -2]
+        T = T - E[:, -1]
         return cls(F=F, E=E, D=D, T=T, lamb=lamb)
 
     @classmethod
@@ -203,9 +196,11 @@ class EI_Network(Low_rank_LIF):
         NE: int = 5,
         NI: int = 5,
         angle_range: list | None = None,
+        Fseed: int | None = None,
         T: int | float | np.ndarray = 0.5,
         lamb: float = 1,
         spike_scale: int | float | np.ndarray = 1,
+        latent_sep: np.ndarray | None = None,
     ) -> Self:
         r"""
         Regularly spaced 2D initialization of the Single_Population network.
@@ -226,7 +221,10 @@ class EI_Network(Low_rank_LIF):
             Number of inhibitory neurons.
 
         angle_range : list, default=None
-            Range of angles for the neurons. If None, the range is :math:`[\pi/4, 3\pi/4]`.
+            Range of angles for the neurons. If None, the range is :math:`[\pi/8, 3\pi/8]`.
+
+        Fseed : int or None, default=None
+            Seed for the random number generator for determining the sign of :math:`\mathbf{F}`.
 
         T : int, float or ndarray of shape (N,), default = 0.5
             Threshold of the neurons.
@@ -237,6 +235,9 @@ class EI_Network(Low_rank_LIF):
         spike_scale : int, float or ndarray, default=1
             Scale of the spikes.
 
+        latent_sep : ndarray(bool) of shape (do, 2), default=None
+            If not None, the latent dimensions are separated. The first (second) column is True if the latent dimension is influenced
+            by excitatory (inhibitory) neurons.
         Returns
         -------
         net: Single_Population
@@ -245,23 +246,25 @@ class EI_Network(Low_rank_LIF):
         N = NE + NI
 
         if angle_range is None:
-            angle_range = [np.pi / 4, 3 * np.pi / 4]
+            angle_range = [np.pi / 8, 3 * np.pi / 8]
 
         assert np.abs(angle_range[1] - angle_range[0]) <= np.pi / 2
         # evenly spaced circular parameters
         E = boundary._2D_circle_spaced(N=N, angle_range=angle_range)
 
-        EIvec = np.ones(N)
-        EIvec[:NI] = -1
-        D = EIvec * E.T
-        D = spike_scale * D
+        D = spike_scale * boundary._dale_decoder_ortho(
+            E, NE, NI, optim=latent_sep is not None, latent_sep=latent_sep
+        )
 
-        F_scale = 0.1
+        F_scale = 0.5
         E_scale = np.sqrt(1 - F_scale**2)
-        F = F_scale * np.random.choice([-1, 1], (N, di))
+        if Fseed is not None:
+            np.random.seed(Fseed)
+        F = F_scale / np.sqrt(di) * np.random.choice([-1, 1], (N, di))
         E = E_scale * E / np.linalg.norm(E, axis=1)[:, np.newaxis]
 
-        T = T - E[:, 1]
+        # T = T + E[:, -2]
+        T = T - E[:, -1]
         return cls(F, E, D, T, lamb)
 
     @classmethod
@@ -272,9 +275,11 @@ class EI_Network(Low_rank_LIF):
         NI: int = 5,
         angle_range: list | None = None,
         seed: int | None = None,
+        Fseed: int | None = None,
         T: int | float | np.ndarray = 0.5,
         lamb: float = 1,
         spike_scale: int | float | np.ndarray = 1,
+        latent_sep: np.ndarray | None = None,
     ) -> Self:
         # TODO consider sending this also to low_rank_LIF
         r"""
@@ -296,10 +301,13 @@ class EI_Network(Low_rank_LIF):
             Dale's law of the network. "I" for inhibitory, "E" for excitatory.
 
         angle_range : list, default=None
-            Range of angles for the neurons. If None, the range is :math:`[\pi/4, 3\pi/4]`.
+            Range of angles for the neurons. If None, the range is :math:`[\pi/8, 3\pi/8]`.
 
         seed : int or None, default=None
             Seed for the random number generator.
+
+        Fseed : int or None, default=None
+            Seed for the random number generator for determining the sign of :math:`\mathbf{F}`.
 
         T : int, float or ndarray of shape (N,), default = 0.5
             Threshold of the neurons.
@@ -310,6 +318,10 @@ class EI_Network(Low_rank_LIF):
         spike_scale : int, float or ndarray, default=1
             Scale of the spikes.
 
+        latent_sep : ndarray(bool) of shape (do, 2), default=None
+            If not None, the latent dimensions are separated. The first (second) column is True if the latent dimension is influenced
+            by excitatory (inhibitory) neurons.
+
         Returns
         -------
         net: Single_Population
@@ -318,23 +330,25 @@ class EI_Network(Low_rank_LIF):
         N = NE + NI
 
         if angle_range is None:
-            angle_range = [np.pi / 4, 3 * np.pi / 4]
+            angle_range = [np.pi / 8, 3 * np.pi / 8]
 
         assert np.abs(angle_range[1] - angle_range[0]) <= np.pi / 2
         # evenly spaced circular parameters
         E = boundary._2D_circle_random(N=N, angle_range=angle_range, seed=seed)
 
-        EIvec = np.ones(N)
-        EIvec[:NI] = -1
-        D = EIvec * E.T
-        D = spike_scale * D
+        D = spike_scale * boundary._dale_decoder_ortho(
+            E, NE, NI, optim=latent_sep is not None, latent_sep=latent_sep
+        )
 
-        F_scale = 0.1
+        F_scale = 0.5
         E_scale = np.sqrt(1 - F_scale**2)
-        F = F_scale * np.random.choice([-1, 1], (N, di))
+        if Fseed is not None:
+            np.random.seed(Fseed)
+        F = F_scale / np.sqrt(di) * np.random.choice([-1, 1], (N, di))
         E = E_scale * E / np.linalg.norm(E, axis=1)[:, np.newaxis]
 
-        T = T - E[:, 1]
+        # T = T + E[:, -2]
+        T = T - E[:, -1]
         return cls(F, E, D, T, lamb)
 
     def plot(

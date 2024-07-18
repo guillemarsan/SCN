@@ -427,7 +427,7 @@ class Simulation:
                 inh = np.argwhere(np.all(self.net.W < 0, axis=0)).flatten()
                 inh_cand = np.intersect1d(candidates, inh)
                 if len(inh_cand) > 0:
-                    idx = int(np.argmax(V[inh_cand] - self.net.T[inh_cand]))
+                    idx = inh_cand[np.argmax(V[inh_cand] - self.net.T[inh_cand])]
                 else:
                     idx = int(np.argmax(V - self.net.T))
             case "inh_rand":

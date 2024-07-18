@@ -11,9 +11,7 @@ import numpy as np
 from matplotlib.animation import FuncAnimation
 
 from .autoencoder import Autoencoder
-from .ei_network import EI_Network
 from .low_rank_LIF import Low_rank_LIF
-from .single_population import Single_Population
 from .utils_neuro import (
     _deintegrate,
     _integrate,
@@ -21,8 +19,6 @@ from .utils_neuro import (
     _stimes_from_s,
 )
 from .utils_plots import _get_colors, _save_ani, _save_fig
-
-available_plots = [[Autoencoder, 2, 2], [Single_Population, 1, 2], [EI_Network, 1, 2]]
 
 
 class Simulation:
@@ -479,9 +475,7 @@ class Simulation:
 
         fig = plt.figure(figsize=(20, 10))
 
-        geometry = (
-            geometry and [type(self.net), self.net.di, self.net.do] in available_plots
-        )
+        geometry = geometry and self.net.do == 2
 
         if geometry:
             gs = gridspec.GridSpec(3, 2)
@@ -727,9 +721,7 @@ class Simulation:
 
         fig = plt.figure(figsize=(20, 10))
 
-        geometry = (
-            geometry and [type(self.net), self.net.di, self.net.do] in available_plots
-        )
+        geometry = geometry and self.net.do == 2
 
         if geometry:
             gs = gridspec.GridSpec(3, 2)

@@ -384,7 +384,7 @@ class Single_Population(Low_rank_LIF):
         artists = []
 
         # plot the network
-        if self.di == 1 and self.do == 2:
+        if self.do == 2:
             artists = self._draw_bbox_2D(centered, x0, ax)
             # Y Trajectory
             if y is not None:

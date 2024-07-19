@@ -109,7 +109,7 @@ class Single_Population(Low_rank_LIF):
 
         # assert EI
         W = E @ D
-        W[np.argwhere(np.abs(W) < 1e-10)] = 0
+        W[np.abs(W) < 1e-10] = 0
         assert np.all(W <= 0) or np.all(
             W >= 0
         ), "W should be either positive (E) or negative (I)"

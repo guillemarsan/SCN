@@ -149,8 +149,10 @@ def _get_colors(N: int, W: np.ndarray) -> list:
         List of colors for the neurons.
     """
 
-    excitatory = np.all(W >= 0, axis=0)
-    inhibitory = np.all(W <= 0, axis=0)
+    mockW = W.copy()
+    mockW[np.abs(mockW) < 1e-10] = 0
+    excitatory = np.all(mockW >= 0, axis=0)
+    inhibitory = np.all(mockW <= 0, axis=0)
 
     daleian = np.all(np.logical_or(excitatory, inhibitory))
 

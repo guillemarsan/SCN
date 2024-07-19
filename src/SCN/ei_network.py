@@ -102,7 +102,7 @@ class EI_Network(Low_rank_LIF):
 
         # assert EI
         W = E @ D
-        W[np.argwhere(np.abs(W) < 1e-10)] = 0
+        W[np.abs(W) < 1e-10] = 0
         excitatory = np.all(W >= 0, axis=0)
         inhibitory = np.all(W <= 0, axis=0)
 

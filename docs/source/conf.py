@@ -27,6 +27,7 @@ extensions = [
     "sphinx.ext.autosummary",
     "sphinx.ext.mathjax",
     "sphinx.ext.linkcode",
+    "sphinx_design",
 ]
 
 autodoc_default_options = {

@@ -76,10 +76,10 @@ def _plot_vector(
         point[1],
         vector[0],
         vector[1],
-        scale=9,
+        scale=6,
         scale_units="xy",
         color="grey",
-        alpha=0.4,
+        alpha=0.3,
     )
 
     return arrow

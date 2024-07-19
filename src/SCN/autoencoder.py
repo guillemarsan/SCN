@@ -32,16 +32,16 @@ class Autoencoder(Low_rank_LIF):
 
     References
     ----------
-    Calaim, Nuno, Florian Alexander Dehmelt, Pedro J Gonçalves, and Christian K Machens.
-    “Robustness in Spiking Networks: a Geometric Perspective,” 2021.
-    https://doi.org/10.1101/2020.06.15.148338.
+    Calaim, N., Dehmelt, F. A., Gonçalves, P. J., & Machens, C. K. (2022).
+    The geometry of robustness in spiking neural networks. Elife, 11, e73276.
+    https://doi.org/10.7554/eLife.73276.
 
+    Denève, S., & Machens, C. K. (2016). Efficient codes and balanced networks.
+    Nature neuroscience, 19(3), 375-382.
+    https://doi.org/10.1038/nn.4243.
 
-    Denève, Sophie, and Christian K. Machens. “Efficient Codes and Balanced Networks.”
-    Nature Neuroscience 19, no. 3 (February 23, 2016): 375–82. https://doi.org/10.1038/nn.4243.
-
-    Boerlin, Martin, Christian K. Machens, and Sophie Denève. “Predictive Coding of Dynamical
-    Variables in Balanced Spiking Networks.” PLoS Computational Biology 9, no. 11 (November 2013).
+    Boerlin, M., Machens, C. K., & Denève, S. (2013). Predictive coding of dynamical variables in balanced spiking networks.
+    PLoS computational biology, 9(11), e1003258.
     https://doi.org/10.1371/journal.pcbi.1003258.
 
     Examples

@@ -31,12 +31,12 @@ class Single_Population(Low_rank_LIF):
 
     References
     ----------
-    Podlaski, William & Machens, Christian. (2024). Approximating Nonlinear Functions
-    With Latent Boundaries in Low-Rank Excitatory-Inhibitory Spiking Networks.
-    Neural Computation. 36. 803-857. 10.1162/neco_a_01658.
+    Podlaski, W. F., & Machens, C. K. (2024). Approximating nonlinear functions with latent
+    boundaries in low-rank excitatory-inhibitory spiking networks. Neural Computation, 36(5), 803-857.
+    https://doi.org/10.1162/neco_a_01658
 
-    Mancoo, Allan, Sander W Keemink, and Christian K Machens. “Understanding Spiking
-    Networks through Convex Optimization,” 2020.
+    Mancoo, A., Keemink, S., & Machens, C. K. (2020). Understanding spiking networks through convex optimization.
+    Advances in neural information processing systems, 33, 8824-8835.
 
     Examples
     --------

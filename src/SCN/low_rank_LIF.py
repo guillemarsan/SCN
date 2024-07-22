@@ -23,14 +23,9 @@ class Low_rank_LIF:
     :math:`\dot{\mathbf{x}}(t) = - \lambda \mathbf{x}(t) + \mathbf{c}(t)` and
     :math:`\dot{\mathbf{r}}(t) = - \lambda \mathbf{r}(t) + \mathbf{s}(t)`.
 
-
     See Also
     --------
     :class:`~SCN.autoencoder.Autoencoder` : Autoencoder specialization.
-
-    Notes
-    -----
-    ...
 
     References
     ----------
@@ -38,21 +33,6 @@ class Low_rank_LIF:
     boundaries in low-rank excitatory-inhibitory spiking networks. Neural Computation, 36(5), 803-857.
     https://doi.org/10.1162/neco_a_01658
 
-    Examples
-    --------
-    >>> from sklearn.neural_network import MLPClassifier
-    >>> from sklearn.datasets import make_classification
-    >>> from sklearn.model_selection import train_test_split
-    >>> X, y = make_classification(n_samples=100, random_state=1)
-    >>> X_train, X_test, y_train, y_test = train_test_split(X, y, stratify=y,
-    ...                                                     random_state=1)
-    >>> clf = MLPClassifier(random_state=1, max_iter=300).fit(X_train, y_train)
-    >>> clf.predict_proba(X_test[:1])
-    array([[0.038..., 0.961...]])
-    >>> clf.predict(X_test[:5, :])
-    array([1, 0, 1, 0, 1])
-    >>> clf.score(X_test, y_test)
-    0.8...
     """
 
     F: np.ndarray

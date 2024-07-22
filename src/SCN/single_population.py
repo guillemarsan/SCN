@@ -25,10 +25,6 @@ class Single_Population(Low_rank_LIF):
     --------
     :class:`~SCN.low_rank_LIF.Low_rank_LIF` : Parent model Low_rank_LIF.
 
-    Notes
-    -----
-    Blabla.
-
     References
     ----------
     Podlaski, W. F., & Machens, C. K. (2024). Approximating nonlinear functions with latent
@@ -40,8 +36,8 @@ class Single_Population(Low_rank_LIF):
 
     Examples
     --------
-    >>> from SCN import Single_Population
-    >>> from SCN import Simulation
+    >>> from SCN import Single_Population, Simulation
+    >>> net = Single_Population.init_2D_random(di=2, N=5, dale="I")
     >>> net.plot()
     ...
     >>> sim = Simulation()

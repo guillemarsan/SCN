@@ -26,10 +26,6 @@ class Autoencoder(Low_rank_LIF):
     --------
     :class:`~SCN.low_rank_LIF.Low_rank_LIF` : Parent model Low_rank_LIF.
 
-    Notes
-    -----
-    Blabla.
-
     References
     ----------
     Calaim, N., Dehmelt, F. A., Gonçalves, P. J., & Machens, C. K. (2022).
@@ -46,8 +42,7 @@ class Autoencoder(Low_rank_LIF):
 
     Examples
     --------
-    >>> from SCN import Autoencoder
-    >>> from SCN import Simulation
+    >>> from SCN import Autoencoder, Simulation
     >>> net = Autoencoder.init_random(d=2, N=6)
     >>> net.plot()
     ...

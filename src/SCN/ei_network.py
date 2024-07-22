@@ -32,8 +32,8 @@ class EI_Network(Low_rank_LIF):
 
     Examples
     --------
-    >>> from SCN import Single_Population
-    >>> from SCN import Simulation
+    >>> from SCN import EI_Network, Simulation
+    >>> net = EI_Network.init_2D_spaced(di=2, NE=2, NI=3)
     >>> net.plot()
     ...
     >>> sim = Simulation()

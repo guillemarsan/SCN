@@ -1,17 +1,10 @@
-import time
 from typing import Self
 
 import cvxpy as cp
-import matplotlib.axes
-import matplotlib.figure
-import matplotlib.pyplot as plt
 import numpy as np
-
-from SCN import plot
 
 from . import boundary
 from .low_rank_LIF import Low_rank_LIF
-from .utils_plots import _save_fig
 
 
 class Single_Population(Low_rank_LIF):
@@ -324,120 +317,3 @@ class Single_Population(Low_rank_LIF):
 
         T = T - E[:, 1]
         return cls(F, E, D, T, lamb)
-
-    def plot(
-        self,
-        ax: matplotlib.axes.Axes | None = None,
-        x: np.ndarray | None = None,
-        y: np.ndarray | None = None,
-        save: bool = True,
-    ) -> tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, list]:
-        """
-        Plot the network: bounding boundary (and trajectories)
-
-        If x and y are passed, this is also plotted as trajectories in the bounding box.
-
-        Parameters
-        ----------
-        ax : matplotlib.axes.Axes, default=None
-            Axes to plot to. If None, a new figure is created.
-
-        x : ndarray of shape (di, time_steps), default=None
-            Input trajectory to plot.
-
-        y : ndarray of shape (do, time_steps), default=None
-            Output trajectory to plot.
-
-        save : bool, default=True
-            If True, the figure is saved.
-
-        Returns
-        -------
-        fig : matplotlib.figure.Figure
-            Figure of the plot.
-
-        ax : matplotlib.axes.Axes
-            Axes of the plot.
-
-        artists : list
-            List of artists in the plot.
-        """
-
-        if ax is None:
-            ax = plt.figure(figsize=(10, 10)).gca()
-
-        if x is None:
-            x = np.zeros((self.di, 1))
-        if x.ndim == 1:
-            x = x[:, np.newaxis]
-        if y is not None and y.ndim == 1:
-            y = y[:, np.newaxis]
-
-        # Inhibitory standard
-        centered = np.array([0, -1])
-        x0 = x[:, -1]
-
-        artists = []
-
-        # plot the network
-        if self.do == 2:
-            artists = self._draw_bbox_2D(centered, x0, ax)
-            # Y Trajectory
-            if y is not None:
-                artists_y = plot._plot_traj(ax, y, gradient=True)
-                artists.append(artists_y)
-                artists_leak = plot._plot_vector(ax, y[:, -1], -y[:, -1])
-                artists.append(artists_leak)
-        else:
-            raise NotImplementedError("Only 2D Latents vis. is implemented for now")
-
-        fig = ax.get_figure()
-        assert fig is not None
-        if save:
-            time_stamp = time.strftime("%Y%m%d-%H%M%S")
-            _save_fig(fig, time_stamp + "-single-population.png")
-
-        return fig, ax, artists
-
-    def _animate(
-        self,
-        ax: matplotlib.axes.Axes,
-        artists: list,
-        x: np.ndarray,
-        y: np.ndarray,
-        input_change: bool = False,
-        spiking: np.ndarray | None = None,
-    ) -> None:
-        """
-        Animate the network by modifying the artists.
-
-        Parameters
-        ----------
-        ax : matplotlib.axes.Axes
-            Axes to plot to.
-
-        artists : list
-            List of artists to modify.
-
-        x : ndarray of shape (di, time_steps)
-            Input trajectory to plot.
-
-        y : ndarray of shape (do, time_steps)
-            Output trajectory to plot.
-
-        input_change: bool, default=False
-            If True, the input has changed.
-
-        spiking : ndarray(int), default=None
-            Neurons spiking in this frame. Index starting at 1. -n if the neuron needs to be restored.
-        """
-
-        plot._animate_traj(ax, artists[-2], y)
-        plot._animate_vector(artists[-1], y[:, -1], -y[:, -1])
-        if spiking is not None:
-            plot._animate_spiking(artists, spiking)
-        if input_change:
-            centered = np.array([0, -1])
-            x0 = x[:, -1]
-
-            self._draw_bbox_2D(centered, x0, ax, artists)

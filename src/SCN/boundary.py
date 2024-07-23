@@ -100,7 +100,9 @@ def _2D_circle_random(
     return M
 
 
-def _2D_circle_spaced(N: int = 10, angle_range: list | None = None) -> np.ndarray:
+def _2D_circle_spaced(
+    N: int = 10, angle_range: list | None = None, edges=True
+) -> np.ndarray:
     r"""
     Generate a matrix :math:`2 \times N` with `N` unitary vectors evenly spaced forming a circle in 2D.
 
@@ -115,6 +117,9 @@ def _2D_circle_spaced(N: int = 10, angle_range: list | None = None) -> np.ndarra
     angle_range : list, default=None
         Range of angles for the vectors. If None, the range is :math:`[0, 2 \pi]`.
 
+    edges: bool, default=True
+        If True, the edges are included in the range.
+
     Returns
     -------
     M: np.ndarray of float(2, N)
@@ -125,12 +130,15 @@ def _2D_circle_spaced(N: int = 10, angle_range: list | None = None) -> np.ndarra
         angle_range = [0, 2 * np.pi]
 
     # evenly spaced circular parameters
-    alphas = np.linspace(
-        angle_range[0],
-        angle_range[1],
-        N,
-        endpoint=(angle_range[1] - angle_range[0]) % (2 * np.pi) != 0,
-    )
+    if edges:
+        alphas = np.linspace(
+            angle_range[0],
+            angle_range[1],
+            N,
+            endpoint=(angle_range[1] - angle_range[0]) % (2 * np.pi) != 0,
+        )
+    else:
+        alphas = np.linspace(angle_range[0], angle_range[1], N + 1, endpoint=False)[1:]
     M = np.array([np.cos(alphas), np.sin(alphas)]).T
 
     return M
@@ -180,7 +188,12 @@ def _dale_decoder_ortho(
 
         D = cp.Variable((do, N))
         penalty = cp.norm(D - EIvec * E.T)
-        constraints = [D.T[:NI, :] @ E.T <= 0, D.T[NI:, :] @ E.T >= 0]
+        if NI != 0 and NE != 0:
+            constraints = [D.T[:NI, :] @ E.T <= 0, D.T[NI:, :] @ E.T >= 0]
+        elif NI == 0:
+            constraints = [D.T @ E.T >= 0]  # fully E network
+        else:
+            constraints = [D.T @ E.T <= 0]  # fully I network
         if np.any(mask):
             constraints += [D[mask] == 0]
         prob = cp.Problem(cp.Minimize(penalty), constraints)  # type: ignore

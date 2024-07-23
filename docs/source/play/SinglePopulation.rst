@@ -11,14 +11,14 @@ Single Population (E or I)
     :caption: Single Population example
     :name: Single Population example
 
-    from SCN import Single_Population, Simulation
+    from SCN import EI_Network, Simulation
 
     # Example network
-    net = Single_Population.init_2D_random(di=1, N=5, seed=1, dale="I")
+    net = EI_Network.init_2D_random(di=1, NI=5, seed=1)
 
     # Construct input
     x1 = np.zeros(2000)
-    x2 = np.linspace(0, 0.5, 8000)
+    x2 = np.linspace(0, 0.2, 8000)
     x = np.hstack([x1, x2])
 
     # Run simulation
@@ -32,14 +32,14 @@ Single Population (E or I)
     :alt: Example of Single Population
     :align: center
 
-You can also do the same with an all excitatory population by changing the ``dale`` parameter to "E". However, since
+You can also do the same with an all excitatory population. However, since
 there is no inhibition, the network will simply explode!
 
 .. code-block:: python
     :caption: Single Population E example
     :name: Single Population E example
 
-    net = Single_Population.init_2D_random(di=1, N=5, seed=1, dale="E")
+    net = EI_Network.init_2D_random(di=1, NE=5, seed=1)
 
 .. image:: ../_static/gifs/SinglePopulationE_long.gif
     :alt: Example of Single Population E

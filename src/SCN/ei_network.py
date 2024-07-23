@@ -95,7 +95,7 @@ class EI_Network(Low_rank_LIF):
 
         # assert EI
         W = E @ D
-        W[np.abs(W) < 1e-10] = 0
+        W[np.abs(W) < 1e-9] = 0
         excitatory = np.all(W >= 0, axis=0)
         inhibitory = np.all(W <= 0, axis=0)
 
@@ -114,8 +114,8 @@ class EI_Network(Low_rank_LIF):
         cls,
         di: int = 2,
         do: int = 2,
-        NE: int = 5,
-        NI: int = 5,
+        NE: int = 0,
+        NI: int = 0,
         seed: int | None = None,
         T: int | float | np.ndarray = 0.5,
         lamb: float = 1,
@@ -164,6 +164,7 @@ class EI_Network(Low_rank_LIF):
         """
 
         N = NE + NI
+        assert N > 0, "There needs to be at least one neuron"
 
         # random boundary
         M = boundary._sphere_random(d=di + do, N=N, seed=seed)
@@ -172,13 +173,12 @@ class EI_Network(Low_rank_LIF):
         E = M[:, di:]
 
         # standarize in semi-sphere
-        E[:, -2:] = np.abs(E[:, -2:])
+        E[:, -1:] = np.abs(E[:, -1:])
 
         # find D that respects E/I and latent constraints
         D = boundary._dale_decoder_ortho(E, NE, NI, latent_sep=latent_sep)
 
         # TODO: take this to I
-        # T = T - E[:, -2]
         T = T - E[:, -1]
         return cls(F=F, E=E, D=D, T=T, lamb=lamb)
 
@@ -186,8 +186,8 @@ class EI_Network(Low_rank_LIF):
     def init_2D_spaced(
         cls,
         di: int = 1,
-        NE: int = 5,
-        NI: int = 5,
+        NE: int = 0,
+        NI: int = 0,
         angle_range: list | None = None,
         Fseed: int | None = None,
         T: int | float | np.ndarray = 0.5,
@@ -214,7 +214,7 @@ class EI_Network(Low_rank_LIF):
             Number of inhibitory neurons.
 
         angle_range : list, default=None
-            Range of angles for the neurons. If None, the range is :math:`[\pi/8, 3\pi/8]`.
+            Range of angles for the neurons. If None, the range is :math:`[\pi/4, 3\pi/4]`.
 
         Fseed : int or None, default=None
             Seed for the random number generator for determining the sign of :math:`\mathbf{F}`.
@@ -237,13 +237,20 @@ class EI_Network(Low_rank_LIF):
             Single_Population network with regularly spaced latent boundary.
         """
         N = NE + NI
+        assert N > 0, "There needs to be at least one neuron"
 
         if angle_range is None:
-            angle_range = [np.pi / 8, 3 * np.pi / 8]
+            angle_range = [np.pi / 4, 3 * np.pi / 4]
 
-        assert np.abs(angle_range[1] - angle_range[0]) <= np.pi / 2
+        assert (
+            np.abs(angle_range[1] - angle_range[0]) <= np.pi / 2
+        ), "Angle range too large to mantain E/I"
+        assert (NE != 0 and NI != 0) or not np.any(
+            latent_sep == 1
+        ), "For there to be latent separation there needs to be an E and I population"
+
         # evenly spaced circular parameters
-        E = boundary._2D_circle_spaced(N=N, angle_range=angle_range)
+        E = boundary._2D_circle_spaced(N=N, angle_range=angle_range, edges=False)
 
         D = spike_scale * boundary._dale_decoder_ortho(
             E, NE, NI, optim=latent_sep is not None, latent_sep=latent_sep
@@ -256,7 +263,6 @@ class EI_Network(Low_rank_LIF):
         F = F_scale / np.sqrt(di) * np.random.choice([-1, 1], (N, di))
         E = E_scale * E / np.linalg.norm(E, axis=1)[:, np.newaxis]
 
-        # T = T + E[:, -2]
         T = T - E[:, -1]
         return cls(F, E, D, T, lamb)
 
@@ -264,8 +270,8 @@ class EI_Network(Low_rank_LIF):
     def init_2D_random(
         cls,
         di: int = 1,
-        NE: int = 5,
-        NI: int = 5,
+        NE: int = 0,
+        NI: int = 0,
         angle_range: list | None = None,
         seed: int | None = None,
         Fseed: int | None = None,
@@ -274,7 +280,6 @@ class EI_Network(Low_rank_LIF):
         spike_scale: int | float | np.ndarray = 1,
         latent_sep: np.ndarray | None = None,
     ) -> Self:
-        # TODO consider sending this also to low_rank_LIF
         r"""
         Randomly spaced 2D initialization of the Single_Population network.
 
@@ -321,11 +326,18 @@ class EI_Network(Low_rank_LIF):
             Single_Population network with randomly spaced latent boundary.
         """
         N = NE + NI
+        assert N > 0, "There needs to be at least one neuron"
 
         if angle_range is None:
-            angle_range = [np.pi / 8, 3 * np.pi / 8]
+            angle_range = [np.pi / 4, 3 * np.pi / 4]
 
-        assert np.abs(angle_range[1] - angle_range[0]) <= np.pi / 2
+        assert (
+            np.abs(angle_range[1] - angle_range[0]) <= np.pi / 2
+        ), "Angle range too large to mantain E/I"
+        assert (NE != 0 and NI != 0) or not np.any(
+            latent_sep == 1
+        ), "For there to be latent separation there needs to be an E and I population"
+
         # evenly spaced circular parameters
         E = boundary._2D_circle_random(N=N, angle_range=angle_range, seed=seed)
 

@@ -14,9 +14,7 @@ E/I Network
     from SCN import EI_Network, Simulation
 
     # Example network
-    net = EI_Network.init_2D_random(
-        di=1, NE=3, NI=3, angle_range=[np.pi / 4, 3 * np.pi / 4], seed=5, Fseed=0
-    )
+    net = EI_Network.init_2D_random(di=1, NE=3, NI=3, seed=5, Fseed=0)
 
     # Construct input
     x1 = np.zeros(2000)

@@ -15,7 +15,13 @@
 
     # Example network
     net = EI_Network.init_2D_spaced(
-        di=1, NE=1, NI=1, Fseed=0, latent_sep=np.eye(2), spike_scale=0.5
+        di=1,
+        NE=1,
+        NI=1,
+        Fseed=0,
+        angle_range=[np.pi / 8, 3 * np.pi / 8],
+        latent_sep=np.eye(2),
+        spike_scale=0.5,
     )
 
     # Construct input

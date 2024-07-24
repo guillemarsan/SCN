@@ -108,6 +108,8 @@ For further reading on:
 
         Check the Theoretical Neuroscience (Machens) lab, Champalimaud Foundation, Lisbon, Portugal.
 
+.. centered:: We want to thank Jordi Torrents (Polavieja Lab) for the help with this package.
+
 .. toctree::
     :hidden:
 

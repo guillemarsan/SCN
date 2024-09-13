@@ -11,6 +11,8 @@ Autoencoder
     :caption: Autoencoder example
     :name: Autoencoder example
 
+    import numpy as np
+
     from SCN import Autoencoder, Simulation
 
     # Example network

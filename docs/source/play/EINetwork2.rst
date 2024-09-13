@@ -11,6 +11,8 @@
     :caption: 2 Neurons example
     :name: 2 Neurons example
 
+    import numpy as np
+
     from SCN import EI_Network, Simulation
 
     # Example network

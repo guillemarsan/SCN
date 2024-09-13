@@ -11,6 +11,8 @@ E/I Network
     :caption: EI Network example
     :name: EI Network example
 
+    import numpy as np
+
     from SCN import EI_Network, Simulation
 
     # Example network

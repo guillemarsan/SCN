@@ -11,6 +11,8 @@ Single Population (E or I)
     :caption: Single Population example
     :name: Single Population example
 
+    import numpy as np
+
     from SCN import EI_Network, Simulation
 
     # Example network

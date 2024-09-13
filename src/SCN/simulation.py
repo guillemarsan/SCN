@@ -3,6 +3,7 @@ import string
 import time
 from functools import partial
 
+import cvxpy as cp
 import matplotlib.axes
 import matplotlib.figure
 import matplotlib.gridspec as gridspec
@@ -446,11 +447,145 @@ class Simulation:
                 )
         return idx
 
+    # OPTIMIZE ####
+
+    def optimize(
+        self,
+        net: Low_rank_LIF,
+        x: np.ndarray,
+        I: float = 0,
+        options: list | None = None,
+        tag: str | None = None,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Optimize the network.
+
+        Parameters
+        ----------
+        net : Low_rank_LIF
+            Network to optimize.
+
+        x : ndarray of shape (di,time_steps)
+            Input to the network.
+
+        I : float, default=0
+            External input current.
+
+        options : ndarray of str, default=None
+            Options of the optimization. Subset of ['y_op', 'y_op_lim', 'r_op', 'r_op_lim']. If None, all are computed.
+
+        tag : str, default=None
+            Tag of the simulation. If None, the tag is randomly generated.
+
+        Returns
+        -------
+        y_op: ndarray of shape (do,time_steps)
+            Latent optimum of the network.
+
+        y_op_lim: ndarray of shape (do,time_steps)
+            Latent optimum of the network with infinite rates / infinitesimal spikes.
+
+        r_op: ndarray of shape (N,time_steps)
+            Rate optimum of the neurons.
+
+        r_op_lim: ndarray of shape (N,time_steps)
+            Rate optimum of the neurons with infinite rates / infinitesimal spikes.
+        """
+
+        if options is None:
+            options = ["y_op", "y_op_lim", "r_op", "r_op_lim"]
+
+        x_values = np.unique(x, axis=1)
+
+        xp = cp.Parameter(net.di)
+
+        probs = []
+        y_opv = cp.Variable(net.do)
+        y_opv_lim = cp.Variable(net.do)
+        r_opv = cp.Variable(net.N)
+        r_opv_lim = cp.Variable(net.N)
+        if "y_op" in options:
+            obj = cp.Minimize(cp.norm(y_opv))
+            constraints = [
+                net.F @ xp
+                + net.E @ y_opv
+                + I
+                - net.T
+                + np.linalg.norm(net.D, axis=0) ** 2 / 2
+                <= 0
+            ]
+            prob = cp.Problem(obj, constraints)
+            probs.append(prob)
+        if "y_op_lim" in options:
+            obj = cp.Minimize(cp.norm(y_opv_lim))
+            constraints = [net.F @ xp + net.E @ y_opv_lim + I - net.T <= 0]
+            prob = cp.Problem(obj, constraints)
+            probs.append(prob)
+        if "r_op" in options:
+            EL = np.linalg.pinv(net.E)
+            obj = cp.Minimize(
+                cp.sum_squares(-EL @ net.F @ xp - net.D @ r_opv)
+                - 2
+                * r_opv.T
+                @ net.D.T
+                @ EL
+                @ (net.T - I - np.linalg.norm(net.D, axis=0) ** 2)
+            )
+            constraints = [r_opv >= 0]
+            prob = cp.Problem(obj, list(constraints))
+            probs.append(prob)
+        if "r_op_lim" in options:
+            EL = np.linalg.pinv(net.E)
+            obj = cp.Minimize(
+                cp.sum_squares(-EL @ net.F @ xp - net.D @ r_opv_lim)
+                - 2 * r_opv_lim.T @ net.D.T @ EL @ (net.T - I)
+            )
+            constraints = [r_opv_lim >= 0]
+            prob = cp.Problem(obj, list(constraints))
+            probs.append(prob)
+
+        y_op = np.zeros((net.do, x.shape[1]))
+        y_op_lim = np.zeros((net.do, x.shape[1]))
+        r_op = np.zeros((net.N, x.shape[1]))
+        r_op_lim = np.zeros((net.N, x.shape[1]))
+        for j in range(x_values.shape[1]):
+            xp.value = x_values[:, j]
+            cols = np.where(np.all(x == x_values[:, j : j + 1], axis=0))[0]
+            for prob in probs:
+                prob.solve()
+
+            if "y_op" in options:
+                y_op[:, cols] = y_opv.value[:, np.newaxis]
+            if "y_op_lim" in options:
+                y_op_lim[:, cols] = y_opv_lim.value[:, np.newaxis]
+            if "r_op" in options:
+                r_op[:, cols] = r_opv.value[:, np.newaxis]
+            if "r_op_lim" in options:
+                r_op_lim[:, cols] = r_opv_lim.value[:, np.newaxis]
+
+        if "y_op" in options:
+            self.y_op = y_op
+        if "y_op_lim" in options:
+            self.y_op_lim = y_op_lim
+        if "r_op" in options:
+            self.r_op = r_op
+        if "r_op_lim" in options:
+            self.r_op_lim = r_op_lim
+
+        self.tag = (
+            tag
+            if tag is not None
+            else "".join(random.choice(string.ascii_letters) for i in range(5))
+        )
+
+        return y_op, y_op_lim, r_op, r_op_lim
+
     # PLOTTING ####
 
     def plot(
         self,
         geometry: bool = True,
+        rate_space: bool = True,
         save: bool = True,
     ) -> tuple[matplotlib.figure.Figure, list, list]:
         """
@@ -460,6 +595,9 @@ class Simulation:
         ----------
         geometry : bool, default=True
             If False, do not plot the geometry of the network.
+
+        rate_space : bool, default=True
+            If False, do not plot the rate space of the network.
 
         save : bool, default=True
             If True, save the figure.
@@ -479,8 +617,17 @@ class Simulation:
         fig = plt.figure(figsize=(20, 10))
 
         geometry = geometry and self.net.do == 2
+        rate_space = rate_space and self.net.N == 2
 
-        if geometry:
+        if geometry and rate_space:
+            gs = gridspec.GridSpec(3, 3)
+            ax1 = plt.subplot(gs[0, 2])
+            ax2 = plt.subplot(gs[1, 2])
+            ax3 = plt.subplot(gs[2, 2])
+            ax4 = plt.subplot(gs[:, 0])
+            ax5 = plt.subplot(gs[:, 1])
+            axes = [ax1, ax2, ax3, ax4, ax5]
+        elif geometry or rate_space:
             gs = gridspec.GridSpec(3, 2)
             ax1 = plt.subplot(gs[0, 1])
             ax2 = plt.subplot(gs[1, 1])
@@ -503,6 +650,11 @@ class Simulation:
         artists = [artists_io, artists_spikes, artists_rates]
         if geometry:
             _, _, artists_net = self.net.plot(ax=ax4, x=self.x, y=self.y, save=False)
+            artists.append(artists_net)
+        if rate_space:
+            _, _, artists_net = self.net.plot_rate_space(
+                x=self.x, ax=axes[-1], r=self.r, save=False
+            )
             artists.append(artists_net)
 
         plt.tight_layout()
@@ -711,6 +863,7 @@ class Simulation:
     def animate(
         self,
         geometry: bool = True,
+        rate_space: bool = True,
     ) -> None:
         """
         Animate the results of a simulation.
@@ -720,24 +873,40 @@ class Simulation:
         geometry : bool, default=True
             If False, do not plot the geometry of the network.
 
+        rate_space : bool, default=True
+            If False, do not plot the rate space of the network.
+
         """
 
         fig = plt.figure(figsize=(20, 10))
 
         geometry = geometry and self.net.do == 2
+        rate_space = rate_space and self.net.N == 2
 
-        if geometry:
+        if geometry and rate_space:
+            gs = gridspec.GridSpec(3, 3)
+            ax1 = plt.subplot(gs[0, 2])
+            ax2 = plt.subplot(gs[1, 2])
+            ax3 = plt.subplot(gs[2, 2])
+            ax4 = plt.subplot(gs[:, 0])
+            ax5 = plt.subplot(gs[:, 1])
+            axes = [ax1, ax2, ax3, ax4, ax5]
+        elif geometry or rate_space:
             gs = gridspec.GridSpec(3, 2)
             ax1 = plt.subplot(gs[0, 1])
             ax2 = plt.subplot(gs[1, 1])
             ax3 = plt.subplot(gs[2, 1])
             ax4 = plt.subplot(gs[:, 0])
+            ax5 = None
+            axes = [ax1, ax2, ax3, ax4]
         else:
             gs = gridspec.GridSpec(3, 1)
             ax1 = plt.subplot(gs[0, 0])
             ax2 = plt.subplot(gs[1, 0])
             ax3 = plt.subplot(gs[2, 0])
             ax4 = None
+            ax5 = None
+            axes = [ax1, ax2, ax3]
 
         artists = []
         _, _, artists_io = self.plot_io(ax=ax1, t=0, save=False)
@@ -747,9 +916,17 @@ class Simulation:
         _, _, artists_rates = self.plot_rates(ax=ax3, t=0, save=False)
         artists = [artists_io, artists_spikes, artists_rates]
 
-        if geometry:
+        x, y, r = None, None, None
+        if geometry or rate_space:
             x, y = self._crop(t=0, type="io")
+            (r,) = self._crop(t=0, type="rates")
+        if geometry:
             _, _, artists_net = self.net.plot(ax=ax4, x=x, y=y, save=False)
+            artists.append(artists_net)
+        if rate_space:
+            _, _, artists_net = self.net.plot_rate_space(
+                x=x, ax=axes[-1], r=r, save=False
+            )
             artists.append(artists_net)
 
         def flatten(l: list) -> list:
@@ -773,8 +950,9 @@ class Simulation:
             self._animate_spikes(artists=artists[1], t=t)
             self._animate_rates(artists=artists[2], t=t)
 
-            if geometry:
+            if geometry or rate_space:
                 x, y = self._crop(t, "io")
+                (r,) = self._crop(t, "rates")
 
                 newspiked = _neurons_spiked_between(self.stimes, tpast, t)
                 oldspiked = _neurons_spiked_between(self.stimes, tpastpast, tpast)
@@ -794,14 +972,24 @@ class Simulation:
                 )
 
                 assert ax4 is not None
-                self.net._animate(
-                    ax=ax4,
-                    artists=artists[3],
-                    x=x,
-                    y=y,
-                    input_change=input_change,
-                    spiking=spiking,
-                )
+                if geometry:
+                    self.net._animate(
+                        ax=ax4,
+                        artists=artists[3],
+                        x=x,
+                        y=y,
+                        input_change=input_change,
+                        spiking=spiking,
+                    )
+                if rate_space:
+                    self.net._animate_rate_space(
+                        ax=axes[-1],
+                        artists=artists[4],
+                        x=x,
+                        r=r,
+                        input_change=input_change,
+                        spiking=spiking,
+                    )
 
             return artists_flatten
 

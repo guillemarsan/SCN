@@ -178,7 +178,80 @@ class Low_rank_LIF:
         assert fig is not None
         if save:
             time_stamp = time.strftime("%Y%m%d-%H%M%S")
-            _save_fig(fig, time_stamp + "-single-population.png")
+            _save_fig(fig, time_stamp + "-bounding-box.png")
+
+        return fig, ax, artists
+
+    def plot_rate_space(
+        self,
+        x: np.ndarray | None = None,
+        ax: matplotlib.axes.Axes | None = None,
+        r: np.ndarray | None = None,
+        save: bool = True,
+    ) -> tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, list]:
+        """
+        Plot the network in rate space: boundaries (and trajectories). Only for N = 2 neurons.
+
+        If r is passed, this is also plotted as a trajectory.
+
+        Parameters
+        ----------
+
+        x : ndarray of shape (di, time_steps), default=None
+            Input to the network.
+
+        ax : matplotlib.axes.Axes, default=None
+            Axes to plot to. If None, a new figure is created.
+
+        r : ndarray of shape (N, time_steps), default=None
+            Rates trajectory to plot.
+
+        save : bool, default=True
+            If True, the figure is saved.
+
+        Returns
+        -------
+        fig : matplotlib.figure.Figure
+            Figure of the plot.
+
+        ax : matplotlib.axes.Axes
+            Axes of the plot.
+
+        artists : list
+            List of artists in the plot.
+        """
+
+        if ax is None:
+            ax = plt.figure(figsize=(10, 10)).gca()
+
+        if x is None:
+            x = np.zeros((self.di, 1))
+        if x.ndim == 1:
+            x = x[:, np.newaxis]
+        if r is not None and r.ndim == 1:
+            r = r[:, np.newaxis]
+
+        x0 = x[:, -1]
+
+        artists = []
+
+        # plot the network
+        if self.N == 2:
+            artists = self._draw_rate_space_2D(x0, ax)
+            # r Trajectory
+            if r is not None:
+                artists_r = plot._plot_traj(ax, r, gradient=True)
+                artists.append(artists_r)
+                artists_leak = plot._plot_vector(ax, r[:, -1], -r[:, -1])
+                artists.append(artists_leak)
+        else:
+            raise NotImplementedError("Only N=2 rate vis. is implemented for now")
+
+        fig = ax.get_figure()
+        assert fig is not None
+        if save:
+            time_stamp = time.strftime("%Y%m%d-%H%M%S")
+            _save_fig(fig, time_stamp + "-rate-space.png")
 
         return fig, ax, artists
 
@@ -224,6 +297,47 @@ class Low_rank_LIF:
             x0 = x[:, -1]
 
             self._draw_bbox_2D(centered, x0, ax, artists)
+
+    def _animate_rate_space(
+        self,
+        ax: matplotlib.axes.Axes,
+        artists: list,
+        x: np.ndarray,
+        r: np.ndarray,
+        input_change: bool = False,
+        spiking: np.ndarray | None = None,
+    ) -> None:
+        """
+        Animate the rate space by modifying the artists.
+
+        Parameters
+        ----------
+        ax : matplotlib.axes.Axes
+            Axes to plot to.
+
+        artists : list
+            List of artists to modify.
+
+        x : ndarray of shape (di, time_steps)
+            Input trajectory to plot.
+
+        r : ndarray of shape (N, time_steps)
+            Rate trajectory to plot.
+
+        input_change: bool, default=False
+            If True, the input has changed.
+
+        spiking : ndarray(int), default=None
+            Neurons spiking in this frame. Index starting at 1. -n if the neuron needs to be restored.
+        """
+
+        plot._animate_traj(ax, artists[-2], r)
+        plot._animate_vector(artists[-1], r[:, -1], -r[:, -1])
+        if spiking is not None:
+            plot._animate_spiking(artists, spiking)
+        if input_change:
+            x0 = x[:, -1]
+            self._draw_rate_space_2D(x0, ax, artists)
 
     def _draw_bbox_2D(
         self,
@@ -343,6 +457,169 @@ class Low_rank_LIF:
         ax.set_ylim(centered[1] - 1, centered[1] + 1)
         ax.set_ylabel("y2")
         ax.set_xlabel("y1")
+        ax.set_aspect("equal")
+
+        return artists
+
+    def _draw_rate_space_2D(
+        self,
+        x0: np.ndarray,
+        ax: matplotlib.axes.Axes,
+        artists: list | None = None,
+    ) -> list:
+        """
+        Draw the rate space visualization of the network. For N = 2 neurons.
+
+        Parameters
+        ----------
+
+        x0 : ndarray of shape (di,)
+            Input of the network.
+
+        ax : matplotlib.axes.Axes
+            Axes to plot the network.
+
+        artists : list, default = None
+            List of artists to update the plot. If None, new artists are created.
+
+        Returns
+        -------
+        artists : list
+            List of artists to update the plot.
+
+        """
+
+        first_frame = artists is None
+
+        if first_frame:
+            artists = []
+
+        colors = _get_colors(self.N, self.W)
+
+        def line_func(y1: np.ndarray, a: float, b: float, c: float) -> np.ndarray:
+            return (-a * y1 - c) / b
+
+        maxinter = 1
+        a = np.zeros(self.N)
+        b = np.zeros(self.N)
+        c = np.zeros(self.N)
+        for n in range(self.N):
+            a[n] = self.W[n, 0]
+            b[n] = self.W[n, 1]
+            c[n] = -self.T[n] + self.F[n, :] @ x0
+            if np.abs(a[n]) < 1e-3:
+                maxinter = np.max([-c[n] / b[n], maxinter])
+            elif np.abs(b[n]) < 1e-3:
+                maxinter = np.max([-c[n] / a[n], maxinter])
+            else:
+                maxinter = np.max([-c[n] / a[n], -c[n] / b[n], maxinter])
+
+        y1x = np.linspace(0, maxinter + 1, 100)
+        y2x = np.linspace(0, maxinter + 1, 100)
+        for n in range(self.N):
+            diag = np.abs(a[n]) < np.abs(b[n])
+            yo_p = (
+                line_func(y1x, a[n], b[n], c[n])
+                if diag
+                else line_func(y2x, b[n], a[n], c[n])
+            )
+            # yo_p[yo_p < 0] = np.nan
+            y1 = y1x if diag else yo_p
+            y2 = yo_p if diag else y2x
+            y1[y1 < 0] = 0
+            y2[y2 < 0] = 0
+
+            # polygon (to optimize: no redraw)
+            if not first_frame:
+                artists[n][0].remove()
+
+            if diag:
+                if (n == 0) * (self.W[n, n] > 0) or (n == 1) * (self.W[n, n] < 0):
+                    poly = ax.fill_between(
+                        y1,
+                        0,
+                        y2,
+                        color=colors[n],
+                        interpolate=True,
+                        alpha=0.2,
+                        zorder=n,
+                    )
+                else:
+                    poly = ax.fill_between(
+                        y1,
+                        y2,
+                        maxinter + 1,
+                        color=colors[n],
+                        interpolate=True,
+                        alpha=0.2,
+                        zorder=n,
+                    )
+            else:
+                if (n == 0) * (self.W[n, n] > 0) or (n == 1) * (self.W[n, n] < 0):
+                    poly = ax.fill_betweenx(
+                        y2,
+                        y1,
+                        maxinter + 1,
+                        color=colors[n],
+                        interpolate=True,
+                        alpha=0.2,
+                        zorder=n,
+                    )
+                else:
+                    poly = ax.fill_betweenx(
+                        y2,
+                        0,
+                        y1,
+                        color=colors[n],
+                        interpolate=True,
+                        alpha=0.2,
+                        zorder=n,
+                    )
+
+            if not first_frame:
+                artists[n][0] = poly
+
+            # line
+            line = None
+            y1[y1 == 0] = np.nan
+            y2[y2 == 0] = np.nan
+            if first_frame:
+                line = ax.plot(y1, y2, linewidth=3, c=colors[n], zorder=n)[0]
+            else:
+                artists[n][1].set_xdata(y1)
+                artists[n][1].set_ydata(y2)
+
+            # quiver
+            quiver = None
+            q0, q1 = _line_closest_point(0, 0, a[n], b[n], c[n])
+            if q0 < 0 or q1 < 0:
+                q0, q1 = _line_closest_point(0, maxinter + 1, a[n], b[n], c[n])
+            if first_frame:
+                quiver = ax.quiver(
+                    q0,
+                    q1,
+                    not n,
+                    n,
+                    color=colors[n],
+                    scale=5,
+                    scale_units="xy",
+                    angles="xy",
+                    zorder=n,
+                )
+            else:
+                artists[n][2].set_offsets([q0, q1])
+                artists[n][2].set_UVC(not n, n)
+                artists[n][2].set_zorder(n)
+
+            if first_frame:
+                artists.append([poly, line, quiver])
+
+        ax.hlines(0, 0, maxinter + 1, color="k")
+        ax.vlines(0, 0, maxinter + 1, color="k")
+        ax.set_xlim(-0.02 * maxinter, maxinter + 1)
+        ax.set_ylim(-0.02 * maxinter, maxinter + 1)
+        ax.set_ylabel("r2")
+        ax.set_xlabel("r1")
         ax.set_aspect("equal")
 
         return artists

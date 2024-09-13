@@ -36,7 +36,7 @@
     sim.run(net, x, draw_break="one", criterion="inh_max", y0=np.array([0, -1]))
 
     # Animate the simulation
-    sim.animate()
+    sim.animate(rate_space=False)
 
 
 

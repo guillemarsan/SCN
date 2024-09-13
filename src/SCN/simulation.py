@@ -9,6 +9,7 @@ import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FuncAnimation
+from scipy.optimize import nnls
 
 from .autoencoder import Autoencoder
 from .low_rank_LIF import Low_rank_LIF
@@ -214,7 +215,8 @@ class Simulation:
         if y0 is not None:
             if V0 is not None or r0 is not None:
                 raise Warning("y0 was given and prioritized over r0 and V0")
-            r0 = np.linalg.lstsq(self.net.D, y0, rcond=None)[0]
+            r0 = nnls(self.net.D, y0)[0]
+            assert r0 is not None, "failed to compute r0 with nnls"
             V0 = self.net.F @ x[:, 0] + self.net.E @ y0 + I
         elif r0 is not None:
             if V0 is not None:
@@ -229,7 +231,8 @@ class Simulation:
         else:
             if isinstance(self.net, Autoencoder):
                 y0 = x[:, 0]
-                r0 = np.linalg.lstsq(self.net.D, y0, rcond=None)[0]
+                r0 = nnls(self.net.D, y0)[0]
+                assert r0 is not None, "failed to compute r0 with nnls"
                 V0 = self.net.F @ x[:, 0] + self.net.E @ y0 + I
             else:
                 # TODO Start within the subthreshold area

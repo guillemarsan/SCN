@@ -407,7 +407,7 @@ class Autoencoder(Low_rank_LIF):
         yinv = y + centered[:, np.newaxis]
 
         plot._animate_traj(ax, artists[-2], yinv)
-        plot._animate_vector(artists[-1], yinv[:, -1], yinv[:, -1] - x[:, 0])
+        plot._animate_vector(artists[-1], yinv[:, -1], -y[:, -1])
         if spiking is not None:
             plot._animate_spiking(artists, spiking)
         if input_change:

@@ -529,7 +529,7 @@ class Simulation:
                 * r_opv.T
                 @ net.D.T
                 @ EL
-                @ (net.T - I - np.linalg.norm(net.D, axis=0) ** 2)
+                @ (net.T - I - np.linalg.norm(net.D, axis=0) ** 2 / 2)
             )
             constraints = [r_opv >= 0]
             prob = cp.Problem(obj, list(constraints))
@@ -649,11 +649,22 @@ class Simulation:
         _, _, artists_rates = self.plot_rates(ax=ax3, t=self.Tmax, save=False)
         artists = [artists_io, artists_spikes, artists_rates]
         if geometry:
-            _, _, artists_net = self.net.plot(ax=ax4, x=self.x, y=self.y, save=False)
+            y_op = self.y_op[:, -1:] if hasattr(self, "y_op") else None
+            y_op_lim = self.y_op_lim[:, -1:] if hasattr(self, "y_op_lim") else None
+            _, _, artists_net = self.net.plot(
+                ax=ax4, x=self.x, y=self.y, y_op=y_op, y_op_lim=y_op_lim, save=False
+            )
             artists.append(artists_net)
         if rate_space:
+            r_op = self.r_op[:, -1:] if hasattr(self, "r_op") else None
+            r_op_lim = self.r_op_lim[:, -1:] if hasattr(self, "r_op_lim") else None
             _, _, artists_net = self.net.plot_rate_space(
-                x=self.x, ax=axes[-1], r=self.r, save=False
+                x=self.x,
+                ax=axes[-1],
+                r=self.r,
+                r_op=r_op,
+                r_op_lim=r_op_lim,
+                save=False,
             )
             artists.append(artists_net)
 
@@ -719,6 +730,35 @@ class Simulation:
             liney = ax.plot(xaxis, y[i, :], color=colorsio[i], label=f"y{i + 1}")[0]
             liney_arr.append(liney)
         artists.append(liney_arr)
+
+        y_op, y_op_lim, _, _ = self._crop(t, "op")
+        if hasattr(self, "y_op"):
+            liney_op_arr = []
+            for i in range(self.net.do):
+                liney_op = ax.plot(
+                    xaxis,
+                    y_op[i, :],
+                    color=colorsio[i],
+                    linestyle=":",
+                    label=f"y_op{i + 1}",
+                    alpha=0.5,
+                )[0]
+                liney_op_arr.append(liney_op)
+            artists.append(liney_op_arr)
+
+        if hasattr(self, "y_op_lim"):
+            liney_op_lim_arr = []
+            for i in range(self.net.do):
+                liney_op_lim = ax.plot(
+                    xaxis,
+                    y_op_lim[i, :],
+                    color=colorsio[i],
+                    linestyle="--",
+                    label=f"y_op_lim{i + 1}",
+                    alpha=0.5,
+                )[0]
+                liney_op_lim_arr.append(liney_op_lim)
+            artists.append(liney_op_lim_arr)
 
         ax.set_ylabel("x(t)/y(t)")
         ax.set_xlabel("time (s)")
@@ -839,9 +879,40 @@ class Simulation:
         xaxis = np.linspace(0, r.shape[1] * self.dt, r.shape[1])
         colors = _get_colors(self.net.N, self.net.W)
 
+        liner = []
         for i in range(self.net.N):
             line = ax.plot(xaxis, r[i, :], color=colors[i], label=f"r{i + 1}")[0]
-            artists.append(line)
+            liner.append(line)
+        artists.append(liner)
+
+        _, _, r_op, r_op_lim = self._crop(t, "op")
+        if hasattr(self, "r_op"):
+            liner_op_arr = []
+            for i in range(self.net.N):
+                liner_op = ax.plot(
+                    xaxis,
+                    r_op[i, :],
+                    color=colors[i],
+                    linestyle=":",
+                    label=f"r_op{i + 1}",
+                    alpha=0.5,
+                )[0]
+                liner_op_arr.append(liner_op)
+            artists.append(liner_op_arr)
+
+        if hasattr(self, "r_op_lim"):
+            liner_op_lim_arr = []
+            for i in range(self.net.N):
+                liner_op_lim = ax.plot(
+                    xaxis,
+                    r_op_lim[i, :],
+                    color=colors[i],
+                    linestyle="--",
+                    label=f"r_op_lim{i + 1}",
+                    alpha=0.5,
+                )[0]
+                liner_op_lim_arr.append(liner_op_lim)
+            artists.append(liner_op_lim_arr)
 
         ax.set_ylabel("r(t)")
         ax.set_xlabel("time (s)")
@@ -916,16 +987,27 @@ class Simulation:
         _, _, artists_rates = self.plot_rates(ax=ax3, t=0, save=False)
         artists = [artists_io, artists_spikes, artists_rates]
 
-        x, y, r = None, None, None
+        x, y, r, y_op, y_op_lim, r_op, r_op_lim = (
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
         if geometry or rate_space:
             x, y = self._crop(t=0, type="io")
             (r,) = self._crop(t=0, type="rates")
+            y_op, y_op_lim, r_op, r_op_lim = self._crop(t=0, type="op")
         if geometry:
-            _, _, artists_net = self.net.plot(ax=ax4, x=x, y=y, save=False)
+            _, _, artists_net = self.net.plot(
+                ax=ax4, x=x, y=y, y_op=y_op, y_op_lim=y_op_lim, save=False
+            )
             artists.append(artists_net)
         if rate_space:
             _, _, artists_net = self.net.plot_rate_space(
-                x=x, ax=axes[-1], r=r, save=False
+                x=x, ax=axes[-1], r=r, r_op=r_op, r_op_lim=r_op_lim, save=False
             )
             artists.append(artists_net)
 
@@ -973,20 +1055,26 @@ class Simulation:
 
                 assert ax4 is not None
                 if geometry:
+                    y_op, y_op_lim, _, _ = self._crop(t, "op")
                     self.net._animate(
                         ax=ax4,
                         artists=artists[3],
                         x=x,
                         y=y,
+                        y_op=y_op,
+                        y_op_lim=y_op_lim,
                         input_change=input_change,
                         spiking=spiking,
                     )
                 if rate_space:
+                    _, _, r_op, r_op_lim = self._crop(t, "op")
                     self.net._animate_rate_space(
                         ax=axes[-1],
                         artists=artists[4],
                         x=x,
                         r=r,
+                        r_op=r_op,
+                        r_op_lim=r_op_lim,
                         input_change=input_change,
                         spiking=spiking,
                     )
@@ -1030,6 +1118,17 @@ class Simulation:
             artists[1][i].set_xdata(xaxis)
             artists[1][i].set_ydata(y[i, :])
 
+        y_op, y_op_lim, _, _ = self._crop(t, "op")
+        if hasattr(self, "y_op"):
+            for i in range(self.net.do):
+                artists[2][i].set_xdata(xaxis)
+                artists[2][i].set_ydata(y_op[i, :])
+
+        if hasattr(self, "y_op_lim"):
+            for i in range(self.net.do):
+                artists[3][i].set_xdata(xaxis)
+                artists[3][i].set_ydata(y_op_lim[i, :])
+
     def _animate_spikes(self, artists: list, t: float) -> None:
         """
         Animate the spikes of the network as a function of time.
@@ -1071,8 +1170,19 @@ class Simulation:
         (r,) = self._crop(t, "rates")
         xaxis = np.linspace(0, r.shape[1] * self.dt, r.shape[1])
         for i in range(self.net.N):
-            artists[i].set_xdata(xaxis)
-            artists[i].set_ydata(r[i, :])
+            artists[0][i].set_xdata(xaxis)
+            artists[0][i].set_ydata(r[i, :])
+
+        _, _, r_op, r_op_lim = self._crop(t, "op")
+        if hasattr(self, "r_op"):
+            for i in range(self.net.N):
+                artists[1][i].set_xdata(xaxis)
+                artists[1][i].set_ydata(r_op[i, :])
+
+        if hasattr(self, "r_op_lim"):
+            for i in range(self.net.N):
+                artists[2][i].set_xdata(xaxis)
+                artists[2][i].set_ydata(r_op_lim[i, :])
 
     def _crop(self, t: float = -1, type: str = "io") -> tuple[np.ndarray, ...]:
         """
@@ -1109,5 +1219,19 @@ class Simulation:
             case "rates":
                 r = self.r[:, : time_step + 1]
                 return (r,)
+            case "op":
+                y_op = self.y_op[:, : time_step + 1] if hasattr(self, "y_op") else None
+                y_op_lim = (
+                    self.y_op_lim[:, : time_step + 1]
+                    if hasattr(self, "y_op_lim")
+                    else None
+                )
+                r_op = self.r_op[:, : time_step + 1] if hasattr(self, "r_op") else None
+                r_op_lim = (
+                    self.r_op_lim[:, : time_step + 1]
+                    if hasattr(self, "r_op_lim")
+                    else None
+                )
+                return y_op, y_op_lim, r_op, r_op_lim  # type:ignore
             case _:
                 raise ValueError("type should be 'io', 'stimes' or 'rates'")

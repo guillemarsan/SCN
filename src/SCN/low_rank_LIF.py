@@ -113,6 +113,8 @@ class Low_rank_LIF:
         ax: matplotlib.axes.Axes | None = None,
         x: np.ndarray | None = None,
         y: np.ndarray | None = None,
+        y_op: np.ndarray | None = None,
+        y_op_lim: np.ndarray | None = None,
         save: bool = True,
     ) -> tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, list]:
         """
@@ -130,6 +132,12 @@ class Low_rank_LIF:
 
         y : ndarray of shape (do, time_steps), default=None
             Output trajectory to plot.
+
+        y_op : ndarray of shape (do, time_steps), default=None
+            Solution to the optimization problem with x(t) as input.
+
+        y_op_lim : ndarray of shape (do, time_steps), default=None
+            Solution to the optimization problem with x(t) as input, in the limit of small spikes.
 
         save : bool, default=True
             If True, the figure is saved.
@@ -171,6 +179,16 @@ class Low_rank_LIF:
                 artists.append(artists_y)
                 artists_leak = plot._plot_vector(ax, y[:, -1], -y[:, -1])
                 artists.append(artists_leak)
+
+            # y_op point
+            if y_op is not None:
+                artists_y_op = plot._plot_scatter(ax, y_op, marker="D")
+                artists.append(artists_y_op)
+
+            # y_op_lim point
+            if y_op_lim is not None:
+                artists_y_op_lim = plot._plot_scatter(ax, y_op_lim, marker="*", size=3)
+                artists.append(artists_y_op_lim)
         else:
             raise NotImplementedError("Only 2D Latents vis. is implemented for now")
 
@@ -187,6 +205,8 @@ class Low_rank_LIF:
         x: np.ndarray | None = None,
         ax: matplotlib.axes.Axes | None = None,
         r: np.ndarray | None = None,
+        r_op: np.ndarray | None = None,
+        r_op_lim: np.ndarray | None = None,
         save: bool = True,
     ) -> tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, list]:
         """
@@ -205,6 +225,12 @@ class Low_rank_LIF:
 
         r : ndarray of shape (N, time_steps), default=None
             Rates trajectory to plot.
+
+        r_op : ndarray of shape (N, time_steps), default=None
+            Solution to the optimization problem with x(t) as input.
+
+        r_op_lim : ndarray of shape (N, time_steps), default=None
+            Solution to the optimization problem with x(t) as input, in the limit of small spikes.
 
         save : bool, default=True
             If True, the figure is saved.
@@ -244,6 +270,16 @@ class Low_rank_LIF:
                 artists.append(artists_r)
                 artists_leak = plot._plot_vector(ax, r[:, -1], -r[:, -1])
                 artists.append(artists_leak)
+
+            # r_op point
+            if r_op is not None:
+                artists_r_op = plot._plot_scatter(ax, r_op, marker="D")
+                artists.append(artists_r_op)
+
+            # r_op_lim point
+            if r_op_lim is not None:
+                artists_r_op_lim = plot._plot_scatter(ax, r_op_lim, marker="*", size=3)
+                artists.append(artists_r_op_lim)
         else:
             raise NotImplementedError("Only N=2 rate vis. is implemented for now")
 
@@ -261,6 +297,8 @@ class Low_rank_LIF:
         artists: list,
         x: np.ndarray,
         y: np.ndarray,
+        y_op: np.ndarray | None = None,
+        y_op_lim: np.ndarray | None = None,
         input_change: bool = False,
         spiking: np.ndarray | None = None,
     ) -> None:
@@ -281,6 +319,12 @@ class Low_rank_LIF:
         y : ndarray of shape (do, time_steps)
             Output trajectory to plot.
 
+        y_op : ndarray of shape (do, time_steps), default=None
+            Solution to the optimization problem with x(t) as input.
+
+        y_op_lim : ndarray of shape (do, time_steps), default=None
+            Solution to the optimization problem with x(t) as input, in the limit of small spikes.
+
         input_change: bool, default=False
             If True, the input has changed.
 
@@ -288,8 +332,14 @@ class Low_rank_LIF:
             Neurons spiking in this frame. Index starting at 1. -n if the neuron needs to be restored.
         """
 
-        plot._animate_traj(ax, artists[-2], y)
-        plot._animate_vector(artists[-1], y[:, -1], -y[:, -1])
+        offset = 0
+        if y_op is not None:
+            offset += 1
+        if y_op_lim is not None:
+            offset += 1
+
+        plot._animate_traj(ax, artists[-2 - offset], y)
+        plot._animate_vector(artists[-1 - offset], y[:, -1], -y[:, -1])
         if spiking is not None:
             plot._animate_spiking(artists, spiking)
         if input_change:
@@ -298,12 +348,19 @@ class Low_rank_LIF:
 
             self._draw_bbox_2D(centered, x0, ax, artists)
 
+            if y_op is not None:
+                plot._animate_scatter(artists[-offset], y_op[:, -1:])
+            if y_op_lim is not None:
+                plot._animate_scatter(artists[-1], y_op_lim[:, -1:])
+
     def _animate_rate_space(
         self,
         ax: matplotlib.axes.Axes,
         artists: list,
         x: np.ndarray,
         r: np.ndarray,
+        r_op: np.ndarray | None = None,
+        r_op_lim: np.ndarray | None = None,
         input_change: bool = False,
         spiking: np.ndarray | None = None,
     ) -> None:
@@ -324,6 +381,12 @@ class Low_rank_LIF:
         r : ndarray of shape (N, time_steps)
             Rate trajectory to plot.
 
+        r_op : ndarray of shape (N, time_steps)
+            Solution to the optimization problem with x(t) as input.
+
+        r_op_lim : ndarray of shape (N, time_steps)
+            Solution to the optimization problem with x(t) as input, in the limit of small spikes.
+
         input_change: bool, default=False
             If True, the input has changed.
 
@@ -331,13 +394,23 @@ class Low_rank_LIF:
             Neurons spiking in this frame. Index starting at 1. -n if the neuron needs to be restored.
         """
 
-        plot._animate_traj(ax, artists[-2], r)
-        plot._animate_vector(artists[-1], r[:, -1], -r[:, -1])
+        offset = 0
+        if r_op is not None:
+            offset += 1
+        if r_op_lim is not None:
+            offset += 1
+
+        plot._animate_traj(ax, artists[-2 - offset], r)
+        plot._animate_vector(artists[-1 - offset], r[:, -1], -r[:, -1])
         if spiking is not None:
             plot._animate_spiking(artists, spiking)
         if input_change:
             x0 = x[:, -1]
             self._draw_rate_space_2D(x0, ax, artists)
+            if r_op is not None:
+                plot._animate_scatter(artists[-offset], r_op[:, -1:])
+            if r_op_lim is not None:
+                plot._animate_scatter(artists[-1], r_op_lim[:, -1:])
 
     def _draw_bbox_2D(
         self,

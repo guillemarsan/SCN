@@ -1,4 +1,5 @@
 import matplotlib.axes
+import matplotlib.collections
 import matplotlib.quiver
 import numpy as np
 
@@ -85,6 +86,60 @@ def _plot_vector(
     return arrow
 
 
+def _plot_scatter(
+    ax: matplotlib.axes.Axes,
+    points: np.ndarray,
+    marker: str = "o",
+    size: int = 1,
+    zorder: int = 10,
+) -> matplotlib.collections.PathCollection:
+    """
+    Plot a scatter of points.
+
+    Parameters
+    ----------
+    ax: matplotlib.axes.Axes
+        Axis to plot the vector.
+
+    points: np.ndarray (2, n_points)
+        Points to plot.
+
+    marker: str, default = "o"
+        Marker to use in the scatter plot.
+
+    size: int, default = 10
+        Size of the markers.
+
+    zorder: int, default = 1
+        Zorder of the markers.
+
+    Returns
+    -------
+    artists: matplotlib.collections.PathCollection
+        Artists to update the plot.
+    """
+
+    # Get the size of the plot in pixels
+    assert ax.figure is not None
+    bbox = ax.get_window_extent().transformed(ax.figure.dpi_scale_trans.inverted())
+    width, height = bbox.width * ax.figure.dpi, bbox.height * ax.figure.dpi
+
+    # Calculate marker size relative to the plot size
+    relative_size = min(width, height) * 0.25 * size  # Adjust the factor as needed
+
+    scatter = ax.scatter(
+        points[0, :],
+        points[1, :],
+        marker=marker,
+        facecolor="white",
+        edgecolor="black",
+        s=relative_size,
+        zorder=zorder,
+    )
+
+    return scatter
+
+
 def _animate_traj(
     ax: matplotlib.axes.Axes,
     artists: list,
@@ -146,6 +201,24 @@ def _animate_vector(
 
     artists.set_offsets([point[0], point[1]])
     artists.set_UVC(vector[0], vector[1])
+
+
+def _animate_scatter(
+    artists: matplotlib.collections.PathCollection, points: np.ndarray
+) -> None:
+    """
+    Animate a scatter of points.
+
+    Parameters
+    ----------
+    artists: matplotlib.collections.PathCollection
+        Artists to update the plot.
+
+    points: np.ndarray (2, n_points)
+        Points to plot.
+    """
+
+    artists.set_offsets(points.T)
 
 
 def _animate_spiking(

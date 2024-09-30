@@ -297,6 +297,8 @@ class Autoencoder(Low_rank_LIF):
         ax: matplotlib.axes.Axes | None = None,
         x: np.ndarray | None = None,
         y: np.ndarray | None = None,
+        y_op: np.ndarray | None = None,
+        y_op_lim: np.ndarray | None = None,
         save: bool = True,
     ) -> tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, list]:
         """
@@ -314,6 +316,12 @@ class Autoencoder(Low_rank_LIF):
 
         y : ndarray of shape (do, time_steps), default=None
             Output trajectory to plot.
+
+        y_op : ndarray of shape (do, time_steps), default=None
+            Solution to the optimization problem with x(t) as input.
+
+        y_op_lim : ndarray of shape (do, time_steps), default=None
+            Solution to the optimization problem with x(t) as input, in the limit of small spikes.
 
         save : bool, default=True
             If True, the figure is saved.
@@ -359,6 +367,16 @@ class Autoencoder(Low_rank_LIF):
                 artists.append(artists_y)
                 artists_leak = plot._plot_vector(ax, y[:, -1], -y[:, -1])
                 artists.append(artists_leak)
+
+            # y_op point
+            if y_op is not None:
+                artists_y_op = plot._plot_scatter(ax, y_op, marker="D")
+                artists.append(artists_y_op)
+
+            # y_op_lim point
+            if y_op_lim is not None:
+                artists_y_op_lim = plot._plot_scatter(ax, y_op_lim, marker="*", size=3)
+                artists.append(artists_y_op_lim)
         else:
             raise NotImplementedError("Only 2D Autoencoder vis. is implemented for now")
 
@@ -376,6 +394,8 @@ class Autoencoder(Low_rank_LIF):
         artists: list,
         x: np.ndarray,
         y: np.ndarray,
+        y_op: np.ndarray | None = None,
+        y_op_lim: np.ndarray | None = None,
         input_change: bool = False,
         spiking: np.ndarray | None = None,
     ) -> None:
@@ -396,6 +416,12 @@ class Autoencoder(Low_rank_LIF):
         y : ndarray of shape (do, time_steps)
             Output trajectory to plot.
 
+        y_op : ndarray of shape (do, time_steps), default=None
+            Solution to the optimization problem with x(t) as input.
+
+        y_op_lim : ndarray of shape (do, time_steps), default=None
+            Solution to the optimization problem with x(t) as input, in the limit of small spikes.
+
         input_change : bool, default=False
             If True, the input is changing.
 
@@ -406,12 +432,25 @@ class Autoencoder(Low_rank_LIF):
         centered = x[:, 0] - x[:, -1]
         yinv = y + centered[:, np.newaxis]
 
-        plot._animate_traj(ax, artists[-2], yinv)
-        plot._animate_vector(artists[-1], yinv[:, -1], -y[:, -1])
+        offset = 0
+        if y_op is not None:
+            offset += 1
+        if y_op_lim is not None:
+            offset += 1
+
+        plot._animate_traj(ax, artists[-2 - offset], yinv)
+        plot._animate_vector(artists[-1 - offset], yinv[:, -1], -y[:, -1])
         if spiking is not None:
             plot._animate_spiking(artists, spiking)
         if input_change:
             plot._animate_axis(ax, x0=x[:, 0], xf=x[:, -1])
 
             xinv = x + centered[:, np.newaxis]
-            plot._animate_traj(ax, artists[-3], traj=xinv, gradient=False)
+            plot._animate_traj(ax, artists[-3 - offset], traj=xinv, gradient=False)
+
+            if y_op is not None:
+                y_opinv = y_op + centered[:, np.newaxis]
+                plot._animate_scatter(artists[-offset], y_opinv[:, -1:])
+            if y_op_lim is not None:
+                y_op_liminv = y_op_lim + centered[:, np.newaxis]
+                plot._animate_scatter(artists[-1], y_op_liminv[:, -1:])

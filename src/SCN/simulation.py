@@ -186,7 +186,7 @@ class Simulation:
                 ), "x second dim. should be equal to time_steps"
             elif x.ndim == 1:
                 if x.shape[0] == net.di:
-                    x = np.tile(x, (1, time_steps))
+                    x = np.tile(x[:, np.newaxis], (1, time_steps))
                 elif x.shape[0] == time_steps:
                     x = np.tile(x, (net.di, 1))
                 else:
@@ -495,6 +495,9 @@ class Simulation:
         if options is None:
             options = ["y_op", "y_op_lim", "r_op", "r_op_lim"]
 
+        if x.ndim == 1:
+            time_steps = int(self.Tmax / self.dt) if hasattr(self, "Tmax") else 10000
+            x = np.tile(x[:, np.newaxis], (1, time_steps))
         x_values = np.unique(x, axis=1)
 
         xp = cp.Parameter(net.di)
@@ -505,7 +508,7 @@ class Simulation:
         r_opv = cp.Variable(net.N)
         r_opv_lim = cp.Variable(net.N)
         if "y_op" in options:
-            obj = cp.Minimize(cp.norm(y_opv))
+            obj = cp.Minimize(net.lamb / 2 * cp.sum_squares(y_opv))
             constraints = [
                 net.F @ xp
                 + net.E @ y_opv
@@ -517,7 +520,7 @@ class Simulation:
             prob = cp.Problem(obj, constraints)
             probs.append(prob)
         if "y_op_lim" in options:
-            obj = cp.Minimize(cp.norm(y_opv_lim))
+            obj = cp.Minimize(net.lamb / 2 * cp.sum_squares(y_opv_lim))
             constraints = [net.F @ xp + net.E @ y_opv_lim + I - net.T <= 0]
             prob = cp.Problem(obj, constraints)
             probs.append(prob)
@@ -616,23 +619,42 @@ class Simulation:
 
         fig = plt.figure(figsize=(20, 10))
 
-        geometry = geometry and self.net.do == 2
-        rate_space = rate_space and self.net.N == 2
+        geometry = geometry and self.net.do in {2, 3}
+        rate_space = rate_space and self.net.N in {2, 3}
 
         if geometry and rate_space:
             gs = gridspec.GridSpec(3, 3)
             ax1 = plt.subplot(gs[0, 2])
             ax2 = plt.subplot(gs[1, 2])
             ax3 = plt.subplot(gs[2, 2])
-            ax4 = plt.subplot(gs[:, 0])
-            ax5 = plt.subplot(gs[:, 1])
+            ax4 = (
+                plt.subplot(gs[:, 0])
+                if self.net.do == 2
+                else plt.subplot(gs[:, 0], projection="3d")
+            )
+            ax5 = (
+                plt.subplot(gs[:, 1])
+                if self.net.N == 2
+                else plt.subplot(gs[:, 1], projection="3d")
+            )
             axes = [ax1, ax2, ax3, ax4, ax5]
         elif geometry or rate_space:
             gs = gridspec.GridSpec(3, 2)
             ax1 = plt.subplot(gs[0, 1])
             ax2 = plt.subplot(gs[1, 1])
             ax3 = plt.subplot(gs[2, 1])
-            ax4 = plt.subplot(gs[:, 0])
+            if geometry:
+                ax4 = (
+                    plt.subplot(gs[:, 0])
+                    if self.net.do == 2
+                    else plt.subplot(gs[:, 0], projection="3d")
+                )
+            else:
+                ax4 = (
+                    plt.subplot(gs[:, 0])
+                    if self.net.N == 2
+                    else plt.subplot(gs[:, 0], projection="3d")
+                )
             axes = [ax1, ax2, ax3, ax4]
         else:
             gs = gridspec.GridSpec(3, 1)
@@ -740,7 +762,7 @@ class Simulation:
                     y_op[i, :],
                     color=colorsio[i],
                     linestyle=":",
-                    label=f"y_op{i + 1}",
+                    label="y_op" if i == 0 else "",
                     alpha=0.5,
                 )[0]
                 liney_op_arr.append(liney_op)
@@ -754,7 +776,7 @@ class Simulation:
                     y_op_lim[i, :],
                     color=colorsio[i],
                     linestyle="--",
-                    label=f"y_op_lim{i + 1}",
+                    label="y_op_lim" if i == 0 else "",
                     alpha=0.5,
                 )[0]
                 liney_op_lim_arr.append(liney_op_lim)
@@ -881,7 +903,11 @@ class Simulation:
 
         liner = []
         for i in range(self.net.N):
-            line = ax.plot(xaxis, r[i, :], color=colors[i], label=f"r{i + 1}")[0]
+            label = ""
+            if i < 10:
+                for j in np.arange(i, self.net.N, 10):
+                    label += f"r{j + 1},"
+            line = ax.plot(xaxis, r[i, :], color=colors[i], label=label)[0]
             liner.append(line)
         artists.append(liner)
 
@@ -894,7 +920,7 @@ class Simulation:
                     r_op[i, :],
                     color=colors[i],
                     linestyle=":",
-                    label=f"r_op{i + 1}",
+                    label="r_op" if i == 0 else "",
                     alpha=0.5,
                 )[0]
                 liner_op_arr.append(liner_op)
@@ -908,7 +934,7 @@ class Simulation:
                     r_op_lim[i, :],
                     color=colors[i],
                     linestyle="--",
-                    label=f"r_op_lim{i + 1}",
+                    label="r_op_lim" if i == 0 else "",
                     alpha=0.5,
                 )[0]
                 liner_op_lim_arr.append(liner_op_lim)
@@ -951,23 +977,42 @@ class Simulation:
 
         fig = plt.figure(figsize=(20, 10))
 
-        geometry = geometry and self.net.do == 2
-        rate_space = rate_space and self.net.N == 2
+        geometry = geometry and self.net.do in {2, 3}
+        rate_space = rate_space and self.net.N in {2, 3}
 
         if geometry and rate_space:
             gs = gridspec.GridSpec(3, 3)
             ax1 = plt.subplot(gs[0, 2])
             ax2 = plt.subplot(gs[1, 2])
             ax3 = plt.subplot(gs[2, 2])
-            ax4 = plt.subplot(gs[:, 0])
-            ax5 = plt.subplot(gs[:, 1])
+            ax4 = (
+                plt.subplot(gs[:, 0])
+                if self.net.do == 2
+                else plt.subplot(gs[:, 0], projection="3d")
+            )
+            ax5 = (
+                plt.subplot(gs[:, 1])
+                if self.net.N == 2
+                else plt.subplot(gs[:, 1], projection="3d")
+            )
             axes = [ax1, ax2, ax3, ax4, ax5]
         elif geometry or rate_space:
             gs = gridspec.GridSpec(3, 2)
             ax1 = plt.subplot(gs[0, 1])
             ax2 = plt.subplot(gs[1, 1])
             ax3 = plt.subplot(gs[2, 1])
-            ax4 = plt.subplot(gs[:, 0])
+            if geometry:
+                ax4 = (
+                    plt.subplot(gs[:, 0])
+                    if self.net.do == 2
+                    else plt.subplot(gs[:, 0], projection="3d")
+                )
+            else:
+                ax4 = (
+                    plt.subplot(gs[:, 0])
+                    if self.net.N == 2
+                    else plt.subplot(gs[:, 0], projection="3d")
+                )
             ax5 = None
             axes = [ax1, ax2, ax3, ax4]
         else:
@@ -976,7 +1021,6 @@ class Simulation:
             ax2 = plt.subplot(gs[1, 0])
             ax3 = plt.subplot(gs[2, 0])
             ax4 = None
-            ax5 = None
             axes = [ax1, ax2, ax3]
 
         artists = []
@@ -1001,11 +1045,15 @@ class Simulation:
             (r,) = self._crop(t=0, type="rates")
             y_op, y_op_lim, r_op, r_op_lim = self._crop(t=0, type="op")
         if geometry:
+            y_op = self.y_op[:, -1:] if hasattr(self, "y_op") else None
+            y_op_lim = self.y_op_lim[:, -1:] if hasattr(self, "y_op_lim") else None
             _, _, artists_net = self.net.plot(
                 ax=ax4, x=x, y=y, y_op=y_op, y_op_lim=y_op_lim, save=False
             )
             artists.append(artists_net)
         if rate_space:
+            r_op = self.r_op[:, -1:] if hasattr(self, "r_op") else None
+            r_op_lim = self.r_op_lim[:, -1:] if hasattr(self, "r_op_lim") else None
             _, _, artists_net = self.net.plot_rate_space(
                 x=x, ax=axes[-1], r=r, r_op=r_op, r_op_lim=r_op_lim, save=False
             )
@@ -1070,7 +1118,7 @@ class Simulation:
                     _, _, r_op, r_op_lim = self._crop(t, "op")
                     self.net._animate_rate_space(
                         ax=axes[-1],
-                        artists=artists[4],
+                        artists=artists[-1],
                         x=x,
                         r=r,
                         r_op=r_op,

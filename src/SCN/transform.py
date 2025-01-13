@@ -1,7 +1,7 @@
 import numpy as np
 
 
-def angle_encode(x: np.ndarray, freq: float = 1, offset: float = 0):
+def angle_encode(x: np.ndarray, freq: float = 1, offset: float = 0, dim: int = 2):
     """
     Encode a signal into a circular space.
 
@@ -11,24 +11,34 @@ def angle_encode(x: np.ndarray, freq: float = 1, offset: float = 0):
         Signal to encode.
 
     freq: float, default=1
-        Frequency of the encoding.
+        Frequency of the encoding. freq radians / 1 x unit.
 
     offset: float, default=0
         Offset of the encoding.
+
+    dim: int, default=2
+        Dimension of the encoding >= 2. 2 = circle.
 
     Returns
     -------
     angx: np.ndarray of float(2*di, time_steps)
         Encoded signal.
     """
+
+    assert dim >= 2, "Dimension of the encoding must be >= 2."
+
     if x.ndim == 1:
         x = x[np.newaxis, :]
 
-    angx = np.zeros((2 * x.shape[0], x.shape[1]))
+    angx = np.zeros((dim * x.shape[0], x.shape[1]))
 
     for d in range(x.shape[0]):
-        angx[2 * d, :] = np.cos(freq * x[d, :] + offset)
-        angx[2 * d + 1, :] = np.sin(freq * x[d, :] + offset)
+        for j in range(dim):
+            angx[dim * d + j, :] = (
+                np.cos(freq * x[d, :] + offset)
+                if j % 2 == 0
+                else np.sin(freq * x[d, :] + offset)
+            )
 
     return angx
 

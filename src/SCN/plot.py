@@ -2,8 +2,10 @@ import matplotlib.axes
 import matplotlib.collections
 import matplotlib.quiver
 import numpy as np
+from mpl_toolkits.mplot3d import Axes3D
+from mpl_toolkits.mplot3d.art3d import Line3DCollection
 
-from .utils_plots import _gradient_line
+from .utils_plots import _compute_arrow_segments, _gradient_line
 
 
 def _plot_traj(
@@ -34,14 +36,36 @@ def _plot_traj(
     artists = []
 
     if gradient:
-        final = ax.scatter(traj[0, -1], traj[1, -1], c="black")
-        middle = _gradient_line(traj)
-        ax.add_collection(middle)
-        ini = ax.scatter(traj[0, 0], traj[1, 0], edgecolor="grey", facecolors="none")
+        if traj.shape[0] == 2:
+            final = ax.scatter(traj[0, -1], traj[1, -1], c="black")
+            middle = _gradient_line(traj)
+            ax.add_collection(middle)
+            ini = ax.scatter(
+                traj[0, 0], traj[1, 0], edgecolor="grey", facecolors="none"
+            )
+        else:
+            assert isinstance(ax, Axes3D)
+            final = ax.scatter(traj[0, -1], traj[1, -1], traj[2, -1], c="black")
+            middle = _gradient_line(traj)
+            ax.add_collection3d(middle)
+            ini = ax.scatter(
+                traj[0, 0], traj[1, 0], traj[2, 0], edgecolor="grey", facecolors="none"
+            )
     else:
-        final = ax.scatter(traj[0, -1], traj[1, -1], c="blue")
-        middle = ax.plot(traj[0, :], traj[1, :], color="blue", alpha=0.5)[0]
-        ini = ax.scatter(traj[0, 0], traj[1, 0], edgecolor="blue", facecolors="none")
+        if traj.shape[0] == 2:
+            final = ax.scatter(traj[0, -1], traj[1, -1], c="blue")
+            middle = ax.plot(traj[0, :], traj[1, :], color="blue", alpha=0.5)[0]
+            ini = ax.scatter(
+                traj[0, 0], traj[1, 0], edgecolor="blue", facecolors="none"
+            )
+        else:
+            final = ax.scatter(traj[0, -1], traj[1, -1], traj[2, -1], c="blue")
+            middle = ax.plot(
+                traj[0, :], traj[1, :], traj[2, :], color="blue", alpha=0.5
+            )[0]
+            ini = ax.scatter(
+                traj[0, 0], traj[1, 0], traj[2, 0], edgecolor="blue", facecolors="none"
+            )
 
     artists.append(ini)
     artists.append(middle)
@@ -49,21 +73,23 @@ def _plot_traj(
     return artists
 
 
-def _plot_vector(
-    ax: matplotlib.axes.Axes, point: np.ndarray, vector: np.ndarray
+def _plot_small_vector(
+    ax: matplotlib.axes.Axes,
+    point: np.ndarray,
+    vector: np.ndarray,
 ) -> matplotlib.quiver.Quiver:
     """
-    Plot a vector.
+    Plot a small vector (e.g. leak)
 
     Parameters
     ----------
     ax: matplotlib.axes.Axes
         Axis to plot the vector.
 
-    point: np.ndarray (2,)
+    point: np.ndarray (2,) or (3,)
         Point to start the vector.
 
-    vector: np.ndarray (2,)
+    vector: np.ndarray (2,) or (3,)
         Vector to plot.
 
     Returns
@@ -72,16 +98,91 @@ def _plot_vector(
         Artists to update the plot.
     """
 
-    arrow = ax.quiver(
-        point[0],
-        point[1],
-        vector[0],
-        vector[1],
-        scale=6,
-        scale_units="xy",
-        color="grey",
-        alpha=0.3,
-    )
+    if point.shape[0] == 2:
+        arrow = ax.quiver(
+            point[0],
+            point[1],
+            vector[0],
+            vector[1],
+            scale=6,
+            scale_units="xy",
+            angles="xy",
+            color="grey",
+            alpha=0.3,
+        )
+    else:
+        scale_factor = 0.2
+        vector *= scale_factor
+        arrow = ax.quiver(
+            point[0],
+            point[1],
+            point[2],
+            vector[0],
+            vector[1],
+            vector[2],
+            color="grey",
+            alpha=0.3,
+        )
+
+    return arrow
+
+
+def _plot_big_vector(
+    ax: matplotlib.axes.Axes,
+    point: np.ndarray,
+    vector: np.ndarray,
+    color: str | np.ndarray = "grey",
+    on: bool = True,
+) -> matplotlib.quiver.Quiver:
+    """
+    Plot a big vector (e.g. neurons)
+
+    Parameters
+    ----------
+    ax: matplotlib.axes.Axes
+        Axis to plot the vector.
+
+    point: np.ndarray (2,) or (3,)
+        Point to start the vector.
+
+    vector: np.ndarray (2,) or (3,)
+        Vector to plot.
+
+    color: str or np.ndarray, default = "grey"
+        Color of the vector.
+
+    on: bool, default = True
+        If True, the vector will be plotted. If False, it will disappear.
+
+    Returns
+    -------
+    artists: matplotlib.quiver.Quiver
+        Artists to update the plot.
+    """
+
+    if point.shape[0] == 2:
+        arrow = ax.quiver(
+            point[0],
+            point[1],
+            vector[0],
+            vector[1],
+            scale=6,
+            scale_units="xy",
+            angles="xy",
+            color=color,
+            alpha=1 if on else 0,
+        )
+    else:
+        arrow = ax.quiver(
+            point[0],
+            point[1],
+            point[2],
+            vector[0],
+            vector[1],
+            vector[2],
+            color=color,
+            alpha=1 if on else 0,
+        )
 
     return arrow
 
@@ -101,7 +202,7 @@ def _plot_scatter(
     ax: matplotlib.axes.Axes
         Axis to plot the vector.
 
-    points: np.ndarray (2, n_points)
+    points: np.ndarray (2 or 3, n_points)
         Points to plot.
 
     marker: str, default = "o"
@@ -127,15 +228,27 @@ def _plot_scatter(
     # Calculate marker size relative to the plot size
     relative_size = min(width, height) * 0.25 * size  # Adjust the factor as needed
 
-    scatter = ax.scatter(
-        points[0, :],
-        points[1, :],
-        marker=marker,
-        facecolor="white",
-        edgecolor="black",
-        s=relative_size,
-        zorder=zorder,
-    )
+    if points.shape[0] == 2:
+        scatter = ax.scatter(
+            points[0, :],
+            points[1, :],
+            marker=marker,
+            facecolor="white",
+            edgecolor="black",
+            s=relative_size,
+            zorder=zorder,
+        )
+    else:
+        scatter = ax.scatter(
+            points[0, :],
+            points[1, :],
+            points[2, :],
+            marker=marker,
+            facecolor="white",
+            edgecolor="black",
+            s=relative_size,  # type: ignore
+            zorder=zorder,
+        )
 
     return scatter
 
@@ -168,24 +281,57 @@ def _animate_traj(
         traj = traj[:, np.newaxis]
 
     if gradient:
-        artists[0].set_offsets(traj[:, 0])
-        artists[1].remove()
-        gtraj = _gradient_line(traj, forget=True)
-        ax.add_collection(gtraj)
-        artists[1] = gtraj
-        artists[2].set_offsets(traj[:, -1])
+        if traj.shape[0] == 2:
+            artists[0].set_offsets(traj[:, 0])
+            artists[1].remove()
+            gtraj = _gradient_line(traj, forget=True)
+            ax.add_collection(gtraj)
+            artists[1] = gtraj
+            artists[2].set_offsets(traj[:, -1])
+        elif traj.shape[0] == 3:
+            assert isinstance(ax, Axes3D)
+            artists[0]._offsets3d = (
+                np.array([traj[0, 0]]),
+                np.array([traj[1, 0]]),
+                np.array([traj[2, 0]]),
+            )
+            artists[1].remove()
+            gtraj = _gradient_line(traj, forget=True)
+            ax.add_collection3d(gtraj)
+            artists[1] = gtraj
+            artists[2]._offsets3d = (
+                np.array([traj[0, -1]]),
+                np.array([traj[1, -1]]),
+                np.array([traj[2, -1]]),
+            )
     else:
-        artists[0].set_offsets(traj[:, 0])
-        artists[1].set_xdata(traj[0, :])
-        artists[1].set_ydata(traj[1, :])
-        artists[2].set_offsets(traj[:, -1])
+        if traj.shape[0] == 2:
+            artists[0].set_offsets(traj[:, 0])
+            artists[1].set_xdata(traj[0, :])
+            artists[1].set_ydata(traj[1, :])
+            artists[2].set_offsets(traj[:, -1])
+        elif traj.shape[0] == 3:
+            artists[0]._offsets3d = (
+                np.array([traj[0, 0]]),
+                np.array([traj[1, 0]]),
+                np.array([traj[2, 0]]),
+            )
+            artists[1].set_data(traj[0, :], traj[1, :])
+            artists[1].set_3d_properties(traj[2, :])
+            artists[2]._offsets3d = (
+                np.array([traj[0, -1]]),
+                np.array([traj[1, -1]]),
+                np.array([traj[2, -1]]),
+            )
 
 
-def _animate_vector(
-    artists: matplotlib.quiver.Quiver, point: np.ndarray, vector: np.ndarray
+def _animate_small_vector(
+    artists: matplotlib.quiver.Quiver,
+    point: np.ndarray,
+    vector: np.ndarray,
 ) -> None:
     """
-    Animate a vector.
+    Animate a small vector (e.g. leak).
 
     Parameters
     ----------
@@ -199,8 +345,74 @@ def _animate_vector(
         Vector to plot.
     """
 
-    artists.set_offsets([point[0], point[1]])
-    artists.set_UVC(vector[0], vector[1])
+    if point.shape[0] == 2:
+        artists.set_offsets([point[0], point[1]])
+        artists.set_UVC(vector[0], vector[1])
+    elif point.shape[0] == 3:
+        assert isinstance(artists, Line3DCollection)
+        artists._offsets3d = (  # type: ignore
+            np.array([point[0]]),
+            np.array([point[1]]),
+            np.array([point[2]]),
+        )
+        scale = 0.2
+        artists.set_segments(
+            [
+                [
+                    [point[0], point[1], point[2]],
+                    [
+                        point[0] + scale * vector[0],
+                        point[1] + scale * vector[1],
+                        point[2] + scale * vector[2],
+                    ],
+                ]
+            ]
+        )
+
+
+def _animate_big_vector(
+    artists: matplotlib.quiver.Quiver,
+    point: np.ndarray,
+    vector: np.ndarray | None = None,
+    on: bool = True,
+) -> None:
+    """
+    Animate a big vector (e.g. neurons).
+
+    Parameters
+    ----------
+    artists: matplotlib.quiver.Quiver
+        Artists to update the plot.
+
+    point: np.ndarray (2,)
+        Point to start the vector.
+
+    vector: np.ndarray (2,)
+        Vector to plot. If None, the vector will just be translated.
+
+    on: bool, default = True
+        If True, the vector will be plotted. If False, it will disappear.
+    """
+
+    if point.shape[0] == 2:
+        artists.set_offsets([point[0], point[1]])
+        if vector is not None:
+            artists.set_UVC(vector[0], vector[1])
+    elif point.shape[0] == 3:
+        assert isinstance(artists, Line3DCollection)
+        artists._offsets3d = (  # type: ignore
+            np.array([point[0]]),
+            np.array([point[1]]),
+            np.array([point[2]]),
+        )
+
+        if vector is not None:
+            artists.set_segments(_compute_arrow_segments(point, vector, 1))
+
+    if not on:
+        artists.set_alpha(0)
+    else:
+        artists.set_alpha(1)
 
 
 def _animate_scatter(
@@ -217,8 +429,14 @@ def _animate_scatter(
     points: np.ndarray (2, n_points)
         Points to plot.
     """
-
-    artists.set_offsets(points.T)
+    if points.shape[0] == 2:
+        artists.set_offsets(points.T)
+    else:
+        artists._offsets3d = (  # type: ignore
+            np.array(points[0, :]),
+            np.array(points[1, :]),
+            np.array(points[2, :]),
+        )
 
 
 def _animate_spiking(
@@ -241,10 +459,18 @@ def _animate_spiking(
     for n in spiking:
         # restore normal look
         if n < 0:  # this weird indexing is to differentiate -0 from 0
-            artists[-(n + 1)][1].set_linewidth(3)
+            (
+                artists[-(n + 1)][1].set_linewidth(3)
+                if len(artists[-(n + 1)]) == 3
+                else artists[-(n + 1)][0].set_alpha(0.2)
+            )
         # spike look
         else:
-            artists[n - 1][1].set_linewidth(10)
+            (
+                artists[n - 1][1].set_linewidth(10)
+                if len(artists[n - 1]) == 3
+                else artists[n - 1][0].set_alpha(0.7)
+            )
 
 
 def _animate_axis(ax: matplotlib.axes.Axes, x0: np.ndarray, xf: np.ndarray) -> None:
@@ -256,10 +482,10 @@ def _animate_axis(ax: matplotlib.axes.Axes, x0: np.ndarray, xf: np.ndarray) -> N
     ax: matplotlib.axes.Axes
         Axis object to modify.
 
-    x0: np.ndarray (2,)
+    x0: np.ndarray (2,) or (3,)
         Point to move to xf.
 
-    xf: np.ndarray (2,)
+    xf: np.ndarray (2,) or (3,)
         Point to move x0 to.
     """
     # Axis ticks
@@ -282,3 +508,16 @@ def _animate_axis(ax: matplotlib.axes.Axes, x0: np.ndarray, xf: np.ndarray) -> N
     yticks = nyticks + (x0[1] - xf[1])
     ax.set_yticks(yticks)
     ax.set_yticklabels(nyticks)
+
+    if x0.shape[0] == 3:
+        lm = np.ceil((xf[2] - 1) / 0.25) * 0.25
+
+        nzticks = (
+            np.arange(lm, lm + 2, 0.25)
+            if (xf[2] - 1) % 0.25 != 0
+            else np.arange(lm, lm + 2.0001, 0.25)
+        )
+        zticks = nzticks + (x0[2] - xf[2])
+        assert isinstance(ax, Axes3D)
+        ax.set_zticks(zticks)  # type: ignore
+        ax.set_zticklabels(nzticks)  # type: ignore

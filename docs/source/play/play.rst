@@ -12,3 +12,6 @@ There is so much more you can do!
    SinglePopulation
    EINetwork2
    EINetwork
+   Rate_space
+   Optim
+   3D_plots

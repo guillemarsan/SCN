@@ -7,3 +7,4 @@ src/SCN.egg-info
 animations
 plots
 tests/debug_*.py
+*-workspace

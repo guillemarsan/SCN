@@ -97,7 +97,7 @@ class Autoencoder(Low_rank_LIF):
 
         assert all(np.abs(np.linalg.norm(D, axis=0) - 1) < 1e-10), (
             "The columns of D need to be normalized, if you want to change the boundary"
-            + "use T, if you want to change the spike size use spike_scale"
+            + " use T, if you want to change the spike size use spike_scale"
         )
 
         if spike_scale is not None:
@@ -339,7 +339,13 @@ class Autoencoder(Low_rank_LIF):
         """
 
         if ax is None:
-            ax = plt.figure(figsize=(10, 10)).gca()
+            if self.do == 2:
+                ax = plt.figure(figsize=(10, 10)).gca()
+            elif self.do == 3:
+                plt.figure(figsize=(10, 10))
+                ax = plt.subplot(111, projection="3d")
+            else:
+                raise NotImplementedError("Only 2D and 3D network vis. is possible")
 
         if x is None:
             x = np.zeros((self.di, 1))
@@ -355,8 +361,11 @@ class Autoencoder(Low_rank_LIF):
         artists = []
 
         # plot the network
-        if self.di == 2:
-            artists = self._draw_bbox_2D(centered, x0, ax)
+        if self.di in {2, 3}:
+            if self.di == 2:
+                artists = self._draw_bbox_2D(centered, x0, ax)
+            else:
+                artists = self._draw_bbox_3D(centered, x0, ax)
 
             # X Trajectory
             artists_x = plot._plot_traj(ax, x, gradient=False)
@@ -365,7 +374,7 @@ class Autoencoder(Low_rank_LIF):
             if y is not None:
                 artists_y = plot._plot_traj(ax, y, gradient=True)
                 artists.append(artists_y)
-                artists_leak = plot._plot_vector(ax, y[:, -1], -y[:, -1])
+                artists_leak = plot._plot_small_vector(ax, y[:, -1], -y[:, -1])
                 artists.append(artists_leak)
 
             # y_op point
@@ -378,7 +387,7 @@ class Autoencoder(Low_rank_LIF):
                 artists_y_op_lim = plot._plot_scatter(ax, y_op_lim, marker="*", size=3)
                 artists.append(artists_y_op_lim)
         else:
-            raise NotImplementedError("Only 2D Autoencoder vis. is implemented for now")
+            raise NotImplementedError("Only 2D and 3D Autoencoder vis. is possible")
 
         fig = ax.get_figure()
         assert fig is not None
@@ -439,7 +448,7 @@ class Autoencoder(Low_rank_LIF):
             offset += 1
 
         plot._animate_traj(ax, artists[-2 - offset], yinv)
-        plot._animate_vector(artists[-1 - offset], yinv[:, -1], -y[:, -1])
+        plot._animate_small_vector(artists[-1 - offset], yinv[:, -1], -y[:, -1])
         if spiking is not None:
             plot._animate_spiking(artists, spiking)
         if input_change:
@@ -454,3 +463,95 @@ class Autoencoder(Low_rank_LIF):
             if y_op_lim is not None:
                 y_op_liminv = y_op_lim + centered[:, np.newaxis]
                 plot._animate_scatter(artists[-1], y_op_liminv[:, -1:])
+
+    def _draw_rate_space_2D(
+        self,
+        x0: np.ndarray,
+        ax: matplotlib.axes.Axes,
+        artists: list | None = None,
+    ) -> list:
+        """
+        Draw the rate space visualization of the network. For N = 2 neurons.
+
+        Parameters
+        ----------
+
+        x0 : ndarray of shape (di,)
+            Input of the network.
+
+        ax : matplotlib.axes.Axes
+            Axes to plot the network.
+
+        artists : list, default = None
+            List of artists to update the plot. If None, new artists are created.
+
+        Returns
+        -------
+        artists : list
+            List of artists to update the plot.
+
+        """
+
+        first_frame = artists is None
+        artists_decod = []
+        artists_prev = []
+        if not first_frame:
+            artists_decod = artists[self.N]
+            artists_prev = artists[: self.N]
+        artists_prev = super()._draw_rate_space_2D(
+            x0, ax, artists=None if first_frame else artists_prev
+        )
+
+        cmap = plt.get_cmap("rainbow")
+        colorsio = [cmap(i) for i in np.linspace(0, 1, np.maximum(self.di, self.do))]
+
+        def line_func(y1: np.ndarray, a: float, b: float, c: float) -> np.ndarray:
+            return (-a * y1 - c) / b
+
+        maxinter = 1
+        a = np.zeros(self.do)
+        b = np.zeros(self.do)
+        c = np.zeros(self.do)
+        for d in range(self.do):
+            a[d] = self.D[d, 0]
+            b[d] = self.D[d, 1]
+            c[d] = -x0[d]
+            if np.abs(a[d]) < 1e-3:
+                if np.abs(b[d]) < 1e-3:
+                    continue
+                maxinter = np.max([-c[d] / b[d], maxinter])
+            elif np.abs(b[d]) < 1e-3:
+                maxinter = np.max([-c[d] / a[d], maxinter])
+            else:
+                maxinter = np.max([-c[d] / a[d], -c[d] / b[d], maxinter])
+
+        y1x = np.linspace(0, maxinter + 1, 100)
+        y2x = np.linspace(0, maxinter + 1, 100)
+        for d in range(self.do):
+            if np.abs(a[d]) < 1e-3 and np.abs(b[d]) < 1e-3:
+                continue
+            diag = np.abs(a[d]) < np.abs(b[d])
+            yo_p = (
+                line_func(y1x, a[d], b[d], c[d])
+                if diag
+                else line_func(y2x, b[d], a[d], c[d])
+            )
+            y1 = y1x if diag else yo_p
+            y2 = yo_p if diag else y2x
+            y1[y1 < 0] = 0
+            y2[y2 < 0] = 0
+            if first_frame:
+                line = ax.plot(y1, y2, linewidth=1, c=colorsio[d], zorder=d, alpha=0.4)[
+                    0
+                ]
+                artists_decod.append(line)
+            else:
+                artists_decod[d].set_xdata(y1)
+                artists_decod[d].set_ydata(y2)
+                artists[self.N][d] = artists_decod[d]
+
+        if first_frame:
+            artists = artists_prev
+            artists.append(artists_decod)
+
+        return artists

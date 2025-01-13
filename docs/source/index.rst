@@ -44,6 +44,28 @@ SCN
             .. image:: _static/gifs/EINetwork_short.gif
                 :alt: Example of EI Network
 
+    .. grid:: 2 3 3 3
+        :gutter: 1 2 2 2
+        :padding: 4 5 5 5
+
+        .. grid-item-card:: Rate Space
+                :link: play/Rate_space.html
+
+                .. image:: _static/gifs/Autoencoder_rate_short.gif
+                    :alt: Example of rate space
+
+        .. grid-item-card:: Optimization
+                :link: play/Optim.html
+
+                .. image:: _static/gifs/Autoencoder_optim_short.gif
+                    :alt: Example of optimization problem
+
+        .. grid-item-card:: 3D networks
+                :link: play/3D_plots.html
+
+                .. image:: _static/gifs/Autoencoder_3D_short.gif
+                    :alt: Example of 3D plot
+
 .. grid:: 1 2 3 3
     :margin: 4 4 0 0
     :padding: 1

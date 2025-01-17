@@ -106,13 +106,14 @@ class Autoencoder(Low_rank_LIF):
                 or spike_scale.shape[0] == D.shape[1]
             ), "spike_scale is a single value or an array with as many values as neurons"
 
+        D = spike_scale * D
         F = D.T
         E = -D.T
 
         if isinstance(T, (int, float)):
             T = T * np.ones(D.shape[1])
 
-        D = spike_scale * D
+        T = spike_scale * T
 
         assert T is not None and not isinstance(T, (int, float))
         super().__init__(F=F, E=E, D=D, T=T, lamb=lamb)

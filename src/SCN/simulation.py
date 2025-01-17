@@ -492,6 +492,10 @@ class Simulation:
             Rate optimum of the neurons with infinite rates / infinitesimal spikes.
         """
 
+        assert np.all(
+            net.E + net.D.T < 1e-6
+        ), "Optimization only developed for E = -D.T"
+
         if options is None:
             options = ["y_op", "y_op_lim", "r_op", "r_op_lim"]
 
@@ -508,7 +512,7 @@ class Simulation:
         r_opv = cp.Variable(net.N)
         r_opv_lim = cp.Variable(net.N)
         if "y_op" in options:
-            obj = cp.Minimize(net.lamb / 2 * cp.sum_squares(y_opv))
+            obj = cp.Minimize(cp.sum_squares(y_opv))
             constraints = [
                 net.F @ xp
                 + net.E @ y_opv
@@ -520,28 +524,24 @@ class Simulation:
             prob = cp.Problem(obj, constraints)
             probs.append(prob)
         if "y_op_lim" in options:
-            obj = cp.Minimize(net.lamb / 2 * cp.sum_squares(y_opv_lim))
+            obj = cp.Minimize(cp.sum_squares(y_opv_lim))
             constraints = [net.F @ xp + net.E @ y_opv_lim + I - net.T <= 0]
             prob = cp.Problem(obj, constraints)
             probs.append(prob)
         if "r_op" in options:
-            EL = np.linalg.pinv(net.E)
             obj = cp.Minimize(
-                cp.sum_squares(-EL @ net.F @ xp - net.D @ r_opv)
-                - 2
-                * r_opv.T
-                @ net.D.T
-                @ EL
-                @ (net.T - I - np.linalg.norm(net.D, axis=0) ** 2 / 2)
+                -2 * r_opv.T @ net.F @ xp
+                + cp.sum_squares(net.D @ r_opv)
+                + 2 * r_opv.T @ (net.T - I - np.linalg.norm(net.D, axis=0) ** 2 / 2)
             )
             constraints = [r_opv >= 0]
             prob = cp.Problem(obj, list(constraints))
             probs.append(prob)
         if "r_op_lim" in options:
-            EL = np.linalg.pinv(net.E)
             obj = cp.Minimize(
-                cp.sum_squares(-EL @ net.F @ xp - net.D @ r_opv_lim)
-                - 2 * r_opv_lim.T @ net.D.T @ EL @ (net.T - I)
+                -2 * r_opv_lim.T @ net.F @ xp
+                + cp.sum_squares(net.D @ r_opv_lim)
+                + 2 * r_opv_lim.T @ (net.T - I)
             )
             constraints = [r_opv_lim >= 0]
             prob = cp.Problem(obj, list(constraints))
@@ -1045,15 +1045,15 @@ class Simulation:
             (r,) = self._crop(t=0, type="rates")
             y_op, y_op_lim, r_op, r_op_lim = self._crop(t=0, type="op")
         if geometry:
-            y_op = self.y_op[:, -1:] if hasattr(self, "y_op") else None
-            y_op_lim = self.y_op_lim[:, -1:] if hasattr(self, "y_op_lim") else None
+            y_op = self.y_op[:, :1] if hasattr(self, "y_op") else None
+            y_op_lim = self.y_op_lim[:, :1] if hasattr(self, "y_op_lim") else None
             _, _, artists_net = self.net.plot(
                 ax=ax4, x=x, y=y, y_op=y_op, y_op_lim=y_op_lim, save=False
             )
             artists.append(artists_net)
         if rate_space:
-            r_op = self.r_op[:, -1:] if hasattr(self, "r_op") else None
-            r_op_lim = self.r_op_lim[:, -1:] if hasattr(self, "r_op_lim") else None
+            r_op = self.r_op[:, :1] if hasattr(self, "r_op") else None
+            r_op_lim = self.r_op_lim[:, :1] if hasattr(self, "r_op_lim") else None
             _, _, artists_net = self.net.plot_rate_space(
                 x=x, ax=axes[-1], r=r, r_op=r_op, r_op_lim=r_op_lim, save=False
             )

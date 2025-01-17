@@ -178,7 +178,7 @@ class Low_rank_LIF:
             y = y[:, np.newaxis]
 
         # Inhibitory standard
-        centered = np.array([0, -1])
+        centered = np.array([0, -1]) if self.do == 2 else np.array([0, 0, -1])
         x0 = x[:, -1]
 
         artists = []
@@ -366,10 +366,13 @@ class Low_rank_LIF:
         if spiking is not None:
             plot._animate_spiking(artists, spiking)
         if input_change:
-            centered = np.array([0, -1])
+            centered = np.array([0, -1]) if self.do == 2 else np.array([0, 0, -1])
             x0 = x[:, -1]
 
-            self._draw_bbox_2D(centered, x0, ax, artists)
+            if self.do == 2:
+                self._draw_bbox_2D(centered, x0, ax, artists)
+            else:
+                self._draw_bbox_3D(centered, x0, ax, artists)
 
             if y_op is not None:
                 plot._animate_scatter(artists[-offset], y_op[:, -1:])
@@ -763,11 +766,23 @@ class Low_rank_LIF:
                 artists[n][0].remove()
 
             if diag:
-                if (n == 0) * (self.W[n, n] > 0) or (n == 1) * (self.W[n, n] < 0):
+                px = y1
+                py = y2
+            else:
+                px = y2
+                py = y1
+
+            if diag != (n == 0):
+                mx = self.W[n, n] > 0
+            else:
+                slope = np.sign(a[n] * -b[n])
+                mx = slope * self.W[n, n] < 0
+            if diag:
+                if not mx:
                     poly = ax.fill_between(
-                        y1,
+                        px,
                         0,
-                        y2,
+                        py,
                         color=colors[n],
                         interpolate=True,
                         alpha=0.2,
@@ -775,8 +790,8 @@ class Low_rank_LIF:
                     )
                 else:
                     poly = ax.fill_between(
-                        y1,
-                        y2,
+                        px,
+                        py,
                         maxinter + 1,
                         color=colors[n],
                         interpolate=True,
@@ -784,11 +799,11 @@ class Low_rank_LIF:
                         zorder=n,
                     )
             else:
-                if (n == 0) * (self.W[n, n] > 0) or (n == 1) * (self.W[n, n] < 0):
+                if not mx:
                     poly = ax.fill_betweenx(
-                        y2,
-                        y1,
-                        maxinter + 1,
+                        px,
+                        0,
+                        py,
                         color=colors[n],
                         interpolate=True,
                         alpha=0.2,
@@ -796,9 +811,9 @@ class Low_rank_LIF:
                     )
                 else:
                     poly = ax.fill_betweenx(
-                        y2,
-                        0,
-                        y1,
+                        px,
+                        py,
+                        maxinter + 1,
                         color=colors[n],
                         interpolate=True,
                         alpha=0.2,

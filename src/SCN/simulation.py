@@ -62,8 +62,8 @@ class Simulation:
     V0: np.ndarray
     r"Initial voltage of the neurons. :math:`N \times 1`."
 
-    I: float
-    r"External input current. :math:`N \times 1`."
+    I: np.ndarray
+    r"External input current. :math: `N \times time\_steps`."
 
     draw_break: str
     "How to break a draw between spikes. Either 'no', 'slowmo' or 'one'."
@@ -102,7 +102,7 @@ class Simulation:
         y0: np.ndarray | None = None,
         r0: np.ndarray | None = None,
         V0: np.ndarray | None = None,
-        I: float = 0,
+        I: float | np.ndarray = 0.0,
         draw_break: str = "no",
         criterion: str = "max",
         dt: float = 0.001,
@@ -131,7 +131,7 @@ class Simulation:
         r0 : ndarray of shape (N,), default=None
             Initial rate of the neurons.
 
-        I : float, default=0
+        I : float or ndrray of shape (N, time_steps), default=0
             External input current.
 
         draw_break : str, default='no'
@@ -192,6 +192,15 @@ class Simulation:
                 else:
                     raise ValueError("x should have either di or time_steps elements")
 
+        if type(I) is float:
+            I = I * np.ones((net.N, time_steps))
+        else:
+            assert type(I) is np.ndarray, "I should be a float or a ndarray"
+            assert I.shape[0] == net.N, "I first dimension should be equal to N"
+            assert (
+                I.shape[1] == time_steps
+            ), "I second dim. should be equal to time_steps"
+
         if c is not None:
             assert c.shape[0] == net.di, "c first dimension should be equal to di"
             assert (
@@ -218,15 +227,15 @@ class Simulation:
                 raise Warning("y0 was given and prioritized over r0 and V0")
             r0, res = nnls(self.net.D, y0)
             assert r0 is not None and res < 1e-6, "failed to compute r0 with nnls"
-            V0 = self.net.F @ x[:, 0] + self.net.E @ y0 + I
+            V0 = self.net.F @ x[:, 0] + self.net.E @ y0 + I[:, 0]
         elif r0 is not None:
             if V0 is not None:
                 raise Warning("r0 was given and prioritized over V0")
             y0 = self.net.D @ r0
-            V0 = self.net.F @ x[:, 0] + self.net.E @ y0 + I
+            V0 = self.net.F @ x[:, 0] + self.net.E @ y0 + I[:, 0]
         elif V0 is not None:
             y0 = np.linalg.lstsq(
-                self.net.E, (V0 - self.net.F @ x[:, 0] - I), rcond=None
+                self.net.E, (V0 - self.net.F @ x[:, 0] - I[:, 0]), rcond=None
             )[0]
             r0 = np.linalg.lstsq(self.net.D, y0, rcond=None)[0]
         else:
@@ -234,12 +243,12 @@ class Simulation:
                 y0 = x[:, 0]
                 r0 = nnls(self.net.D, y0)[0]
                 assert r0 is not None, "failed to compute r0 with nnls"
-                V0 = self.net.F @ x[:, 0] + self.net.E @ y0 + I
+                V0 = self.net.F @ x[:, 0] + self.net.E @ y0 + I[:, 0]
             else:
                 # TODO Start within the subthreshold area
                 y0 = np.zeros(self.net.do)
                 r0 = np.zeros(self.net.N)
-                V0 = self.net.F @ x[:, 0] + self.net.E @ y0 + I
+                V0 = self.net.F @ x[:, 0] + self.net.E @ y0 + I[:, 0]
 
         self.y0 = y0
         self.r0 = r0
@@ -303,7 +312,7 @@ class Simulation:
             V[:, t + 1] = (
                 V[:, t]
                 + self.dt
-                * (-self.net.lamb * V[:, t] + self.net.F @ self.c[:, t] + self.I)
+                * (-self.net.lamb * V[:, t] + self.net.F @ self.c[:, t] + self.I[:, t])
                 + self.net.W @ s[:, t]
             )
             r[:, t + 1] = r[:, t] + self.dt * (-self.net.lamb * r[:, t]) + s[:, t]
@@ -350,7 +359,7 @@ class Simulation:
                 candidates = np.where(V[:, t] > self.net.T)[0]
 
             V[:, t + 1] = V[:, t] + self.dt * (
-                -self.net.lamb * V[:, t] + self.net.F @ self.c[:, t] + self.I
+                -self.net.lamb * V[:, t] + self.net.F @ self.c[:, t] + self.I[:, t]
             )
             r[:, t + 1] = r[:, t] + self.dt * (-self.net.lamb * r[:, t]) + s[:, t]
 
@@ -396,7 +405,7 @@ class Simulation:
             V[:, t + 1] = (
                 V[:, t]
                 + self.dt
-                * (-self.net.lamb * V[:, t] + self.net.F @ self.c[:, t] + self.I)
+                * (-self.net.lamb * V[:, t] + self.net.F @ self.c[:, t] + self.I[:, t])
                 + self.net.W @ s[:, t]
             )
             r[:, t + 1] = r[:, t] + self.dt * (-self.net.lamb * r[:, t]) + s[:, t]
@@ -453,7 +462,7 @@ class Simulation:
         self,
         net: Low_rank_LIF,
         x: np.ndarray,
-        I: float = 0,
+        I: float | np.ndarray = 0.0,
         options: list | None = None,
         tag: str | None = None,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -468,7 +477,7 @@ class Simulation:
         x : ndarray of shape (di,time_steps)
             Input to the network.
 
-        I : float, default=0
+        I : float or ndarray of shape (N, time_steps), default=0
             External input current.
 
         options : ndarray of str, default=None
@@ -504,6 +513,15 @@ class Simulation:
             time_steps = int(self.Tmax / self.dt) if hasattr(self, "Tmax") else 10000
             x = np.tile(x[:, np.newaxis], (1, time_steps))
 
+        if type(I) is float:
+            I = I * np.ones((net.N, x.shape[1]))
+        else:
+            assert type(I) is np.ndarray, "I should be a float or a ndarray"
+            assert I.shape[0] == net.N, "I first dimension should be equal to N"
+            assert (
+                I.shape[1] == x.shape[1]
+            ), "I second dim. should be equal to time_steps"
+
         if np.all(
             np.linalg.eigvals(Q) >= 0
         ):  # positive semidefinite -> convex optimization
@@ -534,9 +552,11 @@ class Simulation:
 
     def _optimize_cvx(self, net, x, Q, I, options):
 
-        x_values = np.unique(x, axis=1)
+        inps = np.vstack([x, I])
+        inps_values = np.unique(inps, axis=1)
 
         xp = cp.Parameter(net.di)
+        Ip = cp.Parameter(net.N)
 
         probs = []
         y_opv = cp.Variable(net.do)
@@ -548,7 +568,7 @@ class Simulation:
             constraints = [
                 net.F @ xp
                 + net.E @ y_opv
-                + I
+                + Ip
                 - net.T
                 + np.linalg.norm(net.D, axis=0) ** 2 / 2
                 <= 0
@@ -557,7 +577,7 @@ class Simulation:
             probs.append(prob)
         if "y_op_lim" in options:
             obj = cp.Minimize(y_opv_lim.T @ Q @ y_opv_lim)
-            constraints = [net.F @ xp + net.E @ y_opv_lim + I - net.T <= 0]
+            constraints = [net.F @ xp + net.E @ y_opv_lim + Ip - net.T <= 0]
             prob = cp.Problem(obj, constraints)
             probs.append(prob)
         if "r_op" in options:
@@ -565,7 +585,7 @@ class Simulation:
             obj = cp.Minimize(
                 -2 * r_opv.T @ net.F @ xp
                 + cp.sum_squares(net.D @ r_opv)
-                + 2 * r_opv.T @ (net.T - I - np.linalg.norm(net.D, axis=0) ** 2 / 2)
+                + 2 * r_opv.T @ (net.T - Ip - np.linalg.norm(net.D, axis=0) ** 2 / 2)
             )
             constraints = [r_opv >= 0]
             prob = cp.Problem(obj, list(constraints))
@@ -575,7 +595,7 @@ class Simulation:
             obj = cp.Minimize(
                 -2 * r_opv_lim.T @ net.F @ xp
                 + cp.sum_squares(net.D @ r_opv_lim)
-                + 2 * r_opv_lim.T @ (net.T - I)
+                + 2 * r_opv_lim.T @ (net.T - Ip)
             )
             constraints = [r_opv_lim >= 0]
             prob = cp.Problem(obj, list(constraints))
@@ -585,9 +605,15 @@ class Simulation:
         y_op_lim = np.zeros((net.do, x.shape[1]))
         r_op = np.zeros((net.N, x.shape[1]))
         r_op_lim = np.zeros((net.N, x.shape[1]))
-        for j in range(x_values.shape[1]):
-            xp.value = x_values[:, j]
-            cols = np.where(np.all(x == x_values[:, j : j + 1], axis=0))[0]
+        for j in range(inps_values.shape[1]):
+            x_value = inps_values[: net.di, j]
+            I_value = inps_values[net.di :, j]
+            xp.value = x_value
+            Ip.value = I_value
+            cols = np.where(
+                np.all(x == x_value[:, np.newaxis], axis=0)
+                * np.all(I == I_value[:, np.newaxis], axis=0)
+            )[0]
             for prob in probs:
                 prob.solve()
 
@@ -705,7 +731,13 @@ class Simulation:
             y_op = self.y_op[:, -1:] if hasattr(self, "y_op") else None
             y_op_lim = self.y_op_lim[:, -1:] if hasattr(self, "y_op_lim") else None
             _, _, artists_net = self.net.plot(
-                ax=ax4, x=self.x, y=self.y, y_op=y_op, y_op_lim=y_op_lim, save=False
+                ax=ax4,
+                x=self.x,
+                y=self.y,
+                I=self.I,
+                y_op=y_op,
+                y_op_lim=y_op_lim,
+                save=False,
             )
             artists.append(artists_net)
         if rate_space:
@@ -713,6 +745,7 @@ class Simulation:
             r_op_lim = self.r_op_lim[:, -1:] if hasattr(self, "r_op_lim") else None
             _, _, artists_net = self.net.plot_rate_space(
                 x=self.x,
+                I=self.I,
                 ax=axes[-1],
                 r=self.r,
                 r_op=r_op,
@@ -1077,7 +1110,8 @@ class Simulation:
         _, _, artists_rates = self.plot_rates(ax=ax3, t=0, save=False)
         artists = [artists_io, artists_spikes, artists_rates]
 
-        x, y, r, y_op, y_op_lim, r_op, r_op_lim = (
+        x, y, I, r, y_op, y_op_lim, r_op, r_op_lim = (
+            None,
             None,
             None,
             None,
@@ -1088,20 +1122,21 @@ class Simulation:
         )
         if geometry or rate_space:
             x, y = self._crop(t=0, type="io")
+            (I,) = self._crop(t=0, type="inp_curr")
             (r,) = self._crop(t=0, type="rates")
             y_op, y_op_lim, r_op, r_op_lim = self._crop(t=0, type="op")
         if geometry:
             y_op = self.y_op[:, :1] if hasattr(self, "y_op") else None
             y_op_lim = self.y_op_lim[:, :1] if hasattr(self, "y_op_lim") else None
             _, _, artists_net = self.net.plot(
-                ax=ax4, x=x, y=y, y_op=y_op, y_op_lim=y_op_lim, save=False
+                ax=ax4, x=x, y=y, I=I, y_op=y_op, y_op_lim=y_op_lim, save=False
             )
             artists.append(artists_net)
         if rate_space:
             r_op = self.r_op[:, :1] if hasattr(self, "r_op") else None
             r_op_lim = self.r_op_lim[:, :1] if hasattr(self, "r_op_lim") else None
             _, _, artists_net = self.net.plot_rate_space(
-                x=x, ax=axes[-1], r=r, r_op=r_op, r_op_lim=r_op_lim, save=False
+                x=x, I=I, ax=axes[-1], r=r, r_op=r_op, r_op_lim=r_op_lim, save=False
             )
             artists.append(artists_net)
 
@@ -1128,6 +1163,7 @@ class Simulation:
 
             if geometry or rate_space:
                 x, y = self._crop(t, "io")
+                (I,) = self._crop(t, "inp_curr")
                 (r,) = self._crop(t, "rates")
 
                 newspiked = _neurons_spiked_between(self.stimes, tpast, t)
@@ -1146,6 +1182,13 @@ class Simulation:
                     if tpast >= 0
                     else False
                 )
+                current_change = (
+                    not np.array_equal(
+                        I[:, int(t / self.dt)], I[:, int(tpast / self.dt)]
+                    )
+                    if tpast >= 0
+                    else False
+                )
 
                 assert ax4 is not None
                 if geometry:
@@ -1154,10 +1197,12 @@ class Simulation:
                         ax=ax4,
                         artists=artists[3],
                         x=x,
+                        I=I,
                         y=y,
                         y_op=y_op,
                         y_op_lim=y_op_lim,
                         input_change=input_change,
+                        current_change=current_change,
                         spiking=spiking,
                     )
                 if rate_space:
@@ -1166,10 +1211,12 @@ class Simulation:
                         ax=axes[-1],
                         artists=artists[-1],
                         x=x,
+                        I=I,
                         r=r,
                         r_op=r_op,
                         r_op_lim=r_op_lim,
                         input_change=input_change,
+                        current_change=current_change,
                         spiking=spiking,
                     )
 
@@ -1292,11 +1339,12 @@ class Simulation:
             Time to crop the results. If -1 the whole simulation is returned.
 
         type : str, default='io'
-            Type of results to crop: 'io' (x,y), 'stimes' (stimes) or 'rates' (r).
+            Type of results to crop: 'io' (x,y), 'inp_curr' (I), 'stimes' (stimes) or 'rates' (r).
 
         Returns
         -------
         x, y : np.ndarray of (di, t/dt), np.ndarray (do, t/dt)
+        I: np.ndarray of (N, t/dt)
         stimes: np.ndarray of (#spikes at time < t, 2)
         rates: np.ndarray (N, t/dt)
             Cropped results.
@@ -1311,6 +1359,9 @@ class Simulation:
                 x = self.x[:, : time_step + 1]
                 y = self.y[:, : time_step + 1]
                 return x, y
+            case "inp_curr":
+                I = self.I[:, : time_step + 1]
+                return (I,)
             case "stimes":
                 stimes = self.stimes[np.where(self.stimes[:, 1] <= t)]
                 return (stimes,)

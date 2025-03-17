@@ -119,6 +119,7 @@ class Low_rank_LIF:
         self,
         ax: matplotlib.axes.Axes | None = None,
         x: np.ndarray | None = None,
+        I: np.ndarray | None = None,
         y: np.ndarray | None = None,
         y_op: np.ndarray | None = None,
         y_op_lim: np.ndarray | None = None,
@@ -140,6 +141,9 @@ class Low_rank_LIF:
 
         x : ndarray of shape (di, time_steps), default=None
             Input trajectory to plot.
+
+        I : ndarray of shape (N, time_steps), default=None
+            Input current to the neurons.
 
         y : ndarray of shape (do, time_steps), default=None
             Output trajectory to plot.
@@ -181,20 +185,26 @@ class Low_rank_LIF:
         if y is not None and y.ndim == 1:
             y = y[:, np.newaxis]
 
+        if I is None:
+            I = np.zeros((self.N, 1))
+        if I.ndim == 1:
+            I = I[:, np.newaxis]
+
         # Inhibitory standard
         x0 = x[:, -1]
+        I0 = I[:, -1]
         negT = self.T.copy()
         negT[self.T > 0] = 0
-        centered = np.linalg.lstsq(self.E, negT - self.F @ x0, rcond=None)[0]
+        centered = np.linalg.lstsq(self.E, negT - self.F @ x0 - I0, rcond=None)[0]
 
         artists = []
 
         # plot the network
         if self.do in {2, 3}:
             artists = (
-                self._draw_bbox_2D(centered, x0, ax)
+                self._draw_bbox_2D(centered, x0, I0, ax)
                 if self.do == 2
-                else self._draw_bbox_3D(centered, x0, ax)
+                else self._draw_bbox_3D(centered, x0, I0, ax)
             )
             # Y Trajectory
             if y is not None:
@@ -227,6 +237,7 @@ class Low_rank_LIF:
     def plot_rate_space(
         self,
         x: np.ndarray | None = None,
+        I: np.ndarray | None = None,
         ax: matplotlib.axes.Axes | None = None,
         r: np.ndarray | None = None,
         r_op: np.ndarray | None = None,
@@ -247,6 +258,9 @@ class Low_rank_LIF:
 
         x : ndarray of shape (di, time_steps), default=None
             Input to the network.
+
+        I : ndarray of shape (N, time_steps), default=None
+            Input current to the neurons.
 
         ax : matplotlib.axes.Axes, default=None
             Axes to plot to. If None, a new figure is created.
@@ -285,16 +299,22 @@ class Low_rank_LIF:
         if r is not None and r.ndim == 1:
             r = r[:, np.newaxis]
 
+        if I is None:
+            I = np.zeros((self.N, 1))
+        if I.ndim == 1:
+            I = I[:, np.newaxis]
+
         x0 = x[:, -1]
+        I0 = I[:, -1]
 
         artists = []
 
         # plot the network
         if self.N in {2, 3}:
             artists = (
-                self._draw_rate_space_2D(x0, ax)
+                self._draw_rate_space_2D(x0, I0, ax)
                 if self.N == 2
-                else self._draw_rate_space_3D(x0, ax)
+                else self._draw_rate_space_3D(x0, I0, ax)
             )
             # r Trajectory
             if r is not None:
@@ -331,10 +351,12 @@ class Low_rank_LIF:
         ax: matplotlib.axes.Axes,
         artists: list,
         x: np.ndarray,
+        I: np.ndarray,
         y: np.ndarray,
         y_op: np.ndarray | None = None,
         y_op_lim: np.ndarray | None = None,
         input_change: bool = False,
+        current_change: bool = False,
         spiking: np.ndarray | None = None,
     ) -> None:
         """
@@ -351,6 +373,9 @@ class Low_rank_LIF:
         x : ndarray of shape (di, time_steps)
             Input trajectory to plot.
 
+        I : ndarray of shape (N, time_steps)
+            Input current to the neurons.
+
         y : ndarray of shape (do, time_steps)
             Output trajectory to plot.
 
@@ -362,6 +387,9 @@ class Low_rank_LIF:
 
         input_change: bool, default=False
             If True, the input has changed.
+
+        current_change: bool, default=False
+            If True, the input current has changed.
 
         spiking : ndarray(int), default=None
             Neurons spiking in this frame. Index starting at 1. -n if the neuron needs to be restored.
@@ -377,16 +405,17 @@ class Low_rank_LIF:
         plot._animate_small_vector(artists[-1 - offset], y[:, -1], -y[:, -1])
         if spiking is not None:
             plot._animate_spiking(artists, spiking)
-        if input_change:
+        if input_change or current_change:
             x0 = x[:, -1]
+            I0 = I[:, -1]
             negT = self.T.copy()
             negT[self.T > 0] = 0
-            centered = np.linalg.lstsq(self.E, negT - self.F @ x0, rcond=None)[0]
+            centered = np.linalg.lstsq(self.E, negT - self.F @ x0 - I0, rcond=None)[0]
 
             if self.do == 2:
-                self._draw_bbox_2D(centered, x0, ax, artists)
+                self._draw_bbox_2D(centered, x0, I0, ax, artists)
             else:
-                self._draw_bbox_3D(centered, x0, ax, artists)
+                self._draw_bbox_3D(centered, x0, I0, ax, artists)
 
             if y_op is not None:
                 plot._animate_scatter(artists[-offset], y_op[:, -1:])
@@ -398,10 +427,12 @@ class Low_rank_LIF:
         ax: matplotlib.axes.Axes,
         artists: list,
         x: np.ndarray,
+        I: np.ndarray,
         r: np.ndarray,
         r_op: np.ndarray | None = None,
         r_op_lim: np.ndarray | None = None,
         input_change: bool = False,
+        current_change: bool = False,
         spiking: np.ndarray | None = None,
     ) -> None:
         """
@@ -418,6 +449,9 @@ class Low_rank_LIF:
         x : ndarray of shape (di, time_steps)
             Input trajectory to plot.
 
+        I : ndarray of shape (N, time_steps)
+            Input current to the neurons.
+
         r : ndarray of shape (N, time_steps)
             Rate trajectory to plot.
 
@@ -429,6 +463,9 @@ class Low_rank_LIF:
 
         input_change: bool, default=False
             If True, the input has changed.
+
+        current_change: bool, default=False
+            If True, the input current has changed.
 
         spiking : ndarray(int), default=None
             Neurons spiking in this frame. Index starting at 1. -n if the neuron needs to be restored.
@@ -444,12 +481,13 @@ class Low_rank_LIF:
         plot._animate_small_vector(artists[-1 - offset], r[:, -1], -r[:, -1])
         if spiking is not None:
             plot._animate_spiking(artists, spiking)
-        if input_change:
+        if input_change or current_change:
             x0 = x[:, -1]
+            I0 = I[:, -1]
             (
-                self._draw_rate_space_2D(x0, ax, artists)
+                self._draw_rate_space_2D(x0, I0, ax, artists)
                 if self.N == 2
-                else self._draw_rate_space_3D(x0, ax, artists)
+                else self._draw_rate_space_3D(x0, I0, ax, artists)
             )
             if r_op is not None:
                 plot._animate_scatter(artists[-offset], r_op[:, -1:])
@@ -460,6 +498,7 @@ class Low_rank_LIF:
         self,
         centered: np.ndarray,
         x0: np.ndarray,
+        I0: np.ndarray,
         ax: matplotlib.axes.Axes,
         artists: list | None = None,
     ) -> list:
@@ -473,6 +512,9 @@ class Low_rank_LIF:
 
         x0 : ndarray of shape (di,)
             Input of the network.
+
+        I0 : ndarray of shape (N,)
+            Input currents of the neurons.
 
         ax : matplotlib.axes.Axes
             Axes to plot the network.
@@ -504,7 +546,7 @@ class Low_rank_LIF:
             # TODO: This could be all that changes (a,b,c) so maybe this is where you need to separate
             a = self.E[n, 0]
             b = self.E[n, 1]
-            c = -self.T[n] + self.F[n, :] @ x0
+            c = -self.T[n] + self.F[n, :] @ x0 + I0[n]
             yo = (
                 line_func(y1x, a, b, c)
                 if np.abs(a) < np.abs(b)
@@ -582,6 +624,7 @@ class Low_rank_LIF:
         self,
         centered: np.ndarray,
         x0: np.ndarray,
+        I0: np.ndarray,
         ax: matplotlib.axes.Axes,
         artists: list | None = None,
     ) -> list:
@@ -595,6 +638,9 @@ class Low_rank_LIF:
 
         x0 : ndarray of shape (di,)
             Input of the network.
+
+        I0 : ndarray of shape (N,)
+            Input currents of the neurons.
 
         ax : matplotlib.axes.Axes
             Axes to plot the network.
@@ -639,7 +685,7 @@ class Low_rank_LIF:
             a[n] = self.E[n, 0]
             b[n] = self.E[n, 1]
             c[n] = self.E[n, 2]
-            d[n] = -self.T[n] + self.F[n, :] @ x0
+            d[n] = -self.T[n] + self.F[n, :] @ x0 + I0[n]
             ver[n] = (
                 0
                 if np.max(np.abs([b[n], c[n]])) < np.abs(a[n])
@@ -669,6 +715,7 @@ class Low_rank_LIF:
                 + self.E[:, 0][:, np.newaxis, np.newaxis] * points[:, :, n, 0]
                 + self.E[:, 1][:, np.newaxis, np.newaxis] * points[:, :, n, 1]
                 + self.E[:, 2][:, np.newaxis, np.newaxis] * points[:, :, n, 2]
+                + I0[:, np.newaxis, np.newaxis]
                 > self.T[:, np.newaxis, np.newaxis] + 1e-10,
                 axis=0,
             )
@@ -712,6 +759,7 @@ class Low_rank_LIF:
     def _draw_rate_space_2D(
         self,
         x0: np.ndarray,
+        I0: np.ndarray,
         ax: matplotlib.axes.Axes,
         artists: list | None = None,
     ) -> list:
@@ -723,6 +771,9 @@ class Low_rank_LIF:
 
         x0 : ndarray of shape (di,)
             Input of the network.
+
+        I0 : ndarray of shape (N,)
+            Input currents of the neurons.
 
         ax : matplotlib.axes.Axes
             Axes to plot the network.
@@ -753,7 +804,7 @@ class Low_rank_LIF:
         for n in range(self.N):
             a[n] = self.W[n, 0]
             b[n] = self.W[n, 1]
-            c[n] = -self.T[n] + self.F[n, :] @ x0
+            c[n] = -self.T[n] + self.F[n, :] @ x0 + I0[n]
             compare = []
             if np.abs(a[n]) > 1e-3:
                 compare.append(-c[n] / a[n])
@@ -877,6 +928,7 @@ class Low_rank_LIF:
     def _draw_rate_space_3D(
         self,
         x0: np.ndarray,
+        I0: np.ndarray,
         ax: matplotlib.axes.Axes,
         artists: list | None = None,
     ) -> list:
@@ -888,6 +940,9 @@ class Low_rank_LIF:
 
         x0 : ndarray of shape (di,)
             Input of the network.
+
+        I0 : ndarray of shape (N,)
+            Input currents of the neurons.
 
         ax : matplotlib.axes.Axes
             Axes to plot the network.
@@ -924,7 +979,7 @@ class Low_rank_LIF:
             a[n] = self.W[n, 0]
             b[n] = self.W[n, 1]
             c[n] = self.W[n, 2]
-            d[n] = -self.T[n] + self.F[n, :] @ x0
+            d[n] = -self.T[n] + self.F[n, :] @ x0 + I0[n]
             compare = []
             if np.abs(a[n]) > 1e-3:
                 compare.append(-d[n] / a[n])
@@ -973,6 +1028,7 @@ class Low_rank_LIF:
                 + self.W[:, 0][:, np.newaxis, np.newaxis] * points[:, :, n, 0]
                 + self.W[:, 1][:, np.newaxis, np.newaxis] * points[:, :, n, 1]
                 + self.W[:, 2][:, np.newaxis, np.newaxis] * points[:, :, n, 2]
+                + I0[:, np.newaxis, np.newaxis]
                 > self.T[:, np.newaxis, np.newaxis] + 1e-10,
                 axis=0,
             )

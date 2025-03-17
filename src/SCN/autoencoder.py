@@ -297,11 +297,16 @@ class Autoencoder(Low_rank_LIF):
         self,
         ax: matplotlib.axes.Axes | None = None,
         x: np.ndarray | None = None,
+        I: np.ndarray | None = None,
         y: np.ndarray | None = None,
         y_op: np.ndarray | None = None,
         y_op_lim: np.ndarray | None = None,
         save: bool = True,
-    ) -> tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, list]:
+    ) -> tuple[
+        matplotlib.figure.Figure | matplotlib.figure.SubFigure,
+        matplotlib.axes.Axes,
+        list,
+    ]:
         """
         Plot the network: bounding box (and trajectories)
 
@@ -314,6 +319,9 @@ class Autoencoder(Low_rank_LIF):
 
         x : ndarray of shape (di, time_steps), default=None
             Input trajectory to plot.
+
+        I : ndarray of shape (N, time_steps), default=None
+            Input current to the neurons.
 
         y : ndarray of shape (do, time_steps), default=None
             Output trajectory to plot.
@@ -329,7 +337,7 @@ class Autoencoder(Low_rank_LIF):
 
         Returns
         -------
-        fig : matplotlib.figure.Figure
+        fig : matplotlib.figure.Figure or matplotlib.figure.SubFigure
             Figure of the plot.
 
         ax : matplotlib.axes.Axes
@@ -355,18 +363,24 @@ class Autoencoder(Low_rank_LIF):
         if y is not None and y.ndim == 1:
             y = y[:, np.newaxis]
 
+        if I is None:
+            I = np.zeros((self.N, x.shape[1]))
+        if I.ndim == 1:
+            I = I[:, np.newaxis]
+
         # Bounding box
         centered = x[:, -1]
         x0 = centered
+        I0 = I[:, -1]
 
         artists = []
 
         # plot the network
         if self.di in {2, 3}:
             if self.di == 2:
-                artists = self._draw_bbox_2D(centered, x0, ax)
+                artists = self._draw_bbox_2D(centered, x0, I0, ax)
             else:
-                artists = self._draw_bbox_3D(centered, x0, ax)
+                artists = self._draw_bbox_3D(centered, x0, I0, ax)
 
             # X Trajectory
             artists_x = plot._plot_traj(ax, x, gradient=False)
@@ -393,6 +407,7 @@ class Autoencoder(Low_rank_LIF):
         fig = ax.get_figure()
         assert fig is not None
         if save:
+            assert type(fig) is matplotlib.figure.Figure
             time_stamp = time.strftime("%Y%m%d-%H%M%S")
             _save_fig(fig, time_stamp + "-autoencoder.png")
 
@@ -403,10 +418,12 @@ class Autoencoder(Low_rank_LIF):
         ax: matplotlib.axes.Axes,
         artists: list,
         x: np.ndarray,
+        I: np.ndarray,
         y: np.ndarray,
         y_op: np.ndarray | None = None,
         y_op_lim: np.ndarray | None = None,
         input_change: bool = False,
+        current_change: bool = False,
         spiking: np.ndarray | None = None,
     ) -> None:
         """
@@ -423,6 +440,9 @@ class Autoencoder(Low_rank_LIF):
         x : ndarray of shape (di, time_steps)
             Input trajectory to plot.
 
+        I : ndarray of shape (N, time_steps)
+            Input current to the neurons.
+
         y : ndarray of shape (do, time_steps)
             Output trajectory to plot.
 
@@ -434,6 +454,9 @@ class Autoencoder(Low_rank_LIF):
 
         input_change : bool, default=False
             If True, the input is changing.
+
+        current_change : bool, default=False
+            If True, the input current is changing.
 
         spiking : ndarray(int), default=None
             Neurons spiking in this frame. Index starting at 1. -n if the neuron needs to be restored.
@@ -452,8 +475,16 @@ class Autoencoder(Low_rank_LIF):
         plot._animate_small_vector(artists[-1 - offset], yinv[:, -1], -y[:, -1])
         if spiking is not None:
             plot._animate_spiking(artists, spiking)
-        if input_change:
-            plot._animate_axis(ax, x0=x[:, 0], xf=x[:, -1])
+        if input_change or current_change:
+            if input_change:
+                plot._animate_axis(ax, x0=x[:, 0], xf=x[:, -1])
+            if current_change:
+                x0 = x[:, -1] + centered
+                I0 = I[:, -1]
+                if self.do == 2:
+                    self._draw_bbox_2D(x[:, 0], x0, I0, ax, artists)
+                else:
+                    self._draw_bbox_3D(x[:, 0], x0, I0, ax, artists)
 
             xinv = x + centered[:, np.newaxis]
             plot._animate_traj(ax, artists[-3 - offset], traj=xinv, gradient=False)
@@ -468,6 +499,7 @@ class Autoencoder(Low_rank_LIF):
     def _draw_rate_space_2D(
         self,
         x0: np.ndarray,
+        I0: np.ndarray,
         ax: matplotlib.axes.Axes,
         artists: list | None = None,
     ) -> list:
@@ -479,6 +511,9 @@ class Autoencoder(Low_rank_LIF):
 
         x0 : ndarray of shape (di,)
             Input of the network.
+
+        I0 : ndarray of shape (N,)
+            Input current to the neurons.
 
         ax : matplotlib.axes.Axes
             Axes to plot the network.
@@ -500,7 +535,7 @@ class Autoencoder(Low_rank_LIF):
             artists_decod = artists[self.N]
             artists_prev = artists[: self.N]
         artists_prev = super()._draw_rate_space_2D(
-            x0, ax, artists=None if first_frame else artists_prev
+            x0, I0, ax, artists=None if first_frame else artists_prev
         )
 
         cmap = plt.get_cmap("rainbow")

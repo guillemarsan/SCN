@@ -151,3 +151,29 @@ def _neurons_spiked_between(stimes: np.ndarray, t0: float, t1: float) -> list:
         .astype(int)
         .tolist()
     )
+
+
+def _canon_symmetric(Q: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    r"""
+    Canonicalize a symmetric matrix as Q = A^\topSA with A orthogonal and S diagonal with only +1 or -1 (signature)
+
+    Parameters
+    ----------
+    Q: np.ndarray of float(N,N)
+        Symmetric matrix
+
+    Returns
+    -------
+    A: np.ndarray of float(N,N)
+        Orthogonal matrix
+
+    S: np.ndarray of float(N,)
+        Diagonal matrix with only +1 or -1. Signature of Q
+
+    """
+    # assert symmetric
+    assert np.allclose(Q, Q.T), "Q should be symmetric"
+    eigval, eigvec = np.linalg.eigh(Q)
+    S = np.diag(np.sign(eigval))
+    A = np.diag(np.sqrt(np.abs(eigval))) @ eigvec.T
+    return A, S

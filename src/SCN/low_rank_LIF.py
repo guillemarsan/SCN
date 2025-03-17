@@ -123,7 +123,11 @@ class Low_rank_LIF:
         y_op: np.ndarray | None = None,
         y_op_lim: np.ndarray | None = None,
         save: bool = True,
-    ) -> tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, list]:
+    ) -> tuple[
+        matplotlib.figure.Figure | matplotlib.figure.SubFigure,
+        matplotlib.axes.Axes,
+        list,
+    ]:
         """
         Plot the network: bounding boundary (and trajectories)
 
@@ -151,7 +155,7 @@ class Low_rank_LIF:
 
         Returns
         -------
-        fig : matplotlib.figure.Figure
+        fig : matplotlib.figure.Figure or matplotlib.figure.SubFigure
             Figure of the plot.
 
         ax : matplotlib.axes.Axes
@@ -178,8 +182,10 @@ class Low_rank_LIF:
             y = y[:, np.newaxis]
 
         # Inhibitory standard
-        centered = np.array([0, -1]) if self.do == 2 else np.array([0, 0, -1])
         x0 = x[:, -1]
+        negT = self.T.copy()
+        negT[self.T > 0] = 0
+        centered = np.linalg.lstsq(self.E, negT - self.F @ x0, rcond=None)[0]
 
         artists = []
 
@@ -212,6 +218,7 @@ class Low_rank_LIF:
         fig = ax.get_figure()
         assert fig is not None
         if save:
+            assert type(fig) is matplotlib.figure.Figure
             time_stamp = time.strftime("%Y%m%d-%H%M%S")
             _save_fig(fig, time_stamp + "-bounding-box.png")
 
@@ -225,7 +232,11 @@ class Low_rank_LIF:
         r_op: np.ndarray | None = None,
         r_op_lim: np.ndarray | None = None,
         save: bool = True,
-    ) -> tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, list]:
+    ) -> tuple[
+        matplotlib.figure.Figure | matplotlib.figure.SubFigure,
+        matplotlib.axes.Axes,
+        list,
+    ]:
         """
         Plot the network in rate space: boundaries (and trajectories). Only for N = 2 or 3 neurons.
 
@@ -254,7 +265,7 @@ class Low_rank_LIF:
 
         Returns
         -------
-        fig : matplotlib.figure.Figure
+        fig : matplotlib.figure.Figure or matplotlib.figure.SubFigure
             Figure of the plot.
 
         ax : matplotlib.axes.Axes
@@ -309,6 +320,7 @@ class Low_rank_LIF:
         fig = ax.get_figure()
         assert fig is not None
         if save:
+            assert type(fig) is matplotlib.figure.Figure
             time_stamp = time.strftime("%Y%m%d-%H%M%S")
             _save_fig(fig, time_stamp + "-rate-space.png")
 
@@ -366,8 +378,10 @@ class Low_rank_LIF:
         if spiking is not None:
             plot._animate_spiking(artists, spiking)
         if input_change:
-            centered = np.array([0, -1]) if self.do == 2 else np.array([0, 0, -1])
             x0 = x[:, -1]
+            negT = self.T.copy()
+            negT[self.T > 0] = 0
+            centered = np.linalg.lstsq(self.E, negT - self.F @ x0, rcond=None)[0]
 
             if self.do == 2:
                 self._draw_bbox_2D(centered, x0, ax, artists)

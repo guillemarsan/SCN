@@ -216,8 +216,8 @@ class Simulation:
         if y0 is not None:
             if V0 is not None or r0 is not None:
                 raise Warning("y0 was given and prioritized over r0 and V0")
-            r0 = nnls(self.net.D, y0)[0]
-            assert r0 is not None, "failed to compute r0 with nnls"
+            r0, res = nnls(self.net.D, y0)
+            assert r0 is not None and res < 1e-6, "failed to compute r0 with nnls"
             V0 = self.net.F @ x[:, 0] + self.net.E @ y0 + I
         elif r0 is not None:
             if V0 is not None:
@@ -492,9 +492,10 @@ class Simulation:
             Rate optimum of the neurons with infinite rates / infinitesimal spikes.
         """
 
-        assert np.all(
-            net.E + net.D.T < 1e-6
-        ), "Optimization only developed for E = -D.T"
+        Q, residuals, _, _ = np.linalg.lstsq(net.D.T, -net.E, rcond=None)
+        assert np.allclose(
+            residuals, 0, atol=1e-10
+        ), "There must be a matrix such that QD = -E^T"
 
         if options is None:
             options = ["y_op", "y_op_lim", "r_op", "r_op_lim"]
@@ -502,6 +503,37 @@ class Simulation:
         if x.ndim == 1:
             time_steps = int(self.Tmax / self.dt) if hasattr(self, "Tmax") else 10000
             x = np.tile(x[:, np.newaxis], (1, time_steps))
+
+        if np.all(
+            np.linalg.eigvals(Q) >= 0
+        ):  # positive semidefinite -> convex optimization
+            y_op, y_op_lim, r_op, r_op_lim = self._optimize_cvx(net, x, Q, I, options)
+        else:
+            # TODO
+            # y_op, y_op_lim, r_op, r_op_lim = self._optimize_cvx_ccv(
+            #     net, x, Q, I, options
+            # )
+            raise ValueError("Non convex optimization not implemented yet")
+
+        if "y_op" in options:
+            self.y_op = y_op
+        if "y_op_lim" in options:
+            self.y_op_lim = y_op_lim
+        if "r_op" in options:
+            self.r_op = r_op
+        if "r_op_lim" in options:
+            self.r_op_lim = r_op_lim
+
+        self.tag = (
+            tag
+            if tag is not None
+            else "".join(random.choice(string.ascii_letters) for i in range(5))
+        )
+
+        return y_op, y_op_lim, r_op, r_op_lim
+
+    def _optimize_cvx(self, net, x, Q, I, options):
+
         x_values = np.unique(x, axis=1)
 
         xp = cp.Parameter(net.di)
@@ -512,7 +544,7 @@ class Simulation:
         r_opv = cp.Variable(net.N)
         r_opv_lim = cp.Variable(net.N)
         if "y_op" in options:
-            obj = cp.Minimize(cp.sum_squares(y_opv))
+            obj = cp.Minimize(y_opv.T @ Q @ y_opv)
             constraints = [
                 net.F @ xp
                 + net.E @ y_opv
@@ -524,11 +556,12 @@ class Simulation:
             prob = cp.Problem(obj, constraints)
             probs.append(prob)
         if "y_op_lim" in options:
-            obj = cp.Minimize(cp.sum_squares(y_opv_lim))
+            obj = cp.Minimize(y_opv_lim.T @ Q @ y_opv_lim)
             constraints = [net.F @ xp + net.E @ y_opv_lim + I - net.T <= 0]
             prob = cp.Problem(obj, constraints)
             probs.append(prob)
         if "r_op" in options:
+            # TODO Add the Q \neq Id case
             obj = cp.Minimize(
                 -2 * r_opv.T @ net.F @ xp
                 + cp.sum_squares(net.D @ r_opv)
@@ -538,6 +571,7 @@ class Simulation:
             prob = cp.Problem(obj, list(constraints))
             probs.append(prob)
         if "r_op_lim" in options:
+            # TODO Add the Q \neq Id case
             obj = cp.Minimize(
                 -2 * r_opv_lim.T @ net.F @ xp
                 + cp.sum_squares(net.D @ r_opv_lim)
@@ -558,28 +592,25 @@ class Simulation:
                 prob.solve()
 
             if "y_op" in options:
-                y_op[:, cols] = y_opv.value[:, np.newaxis]
+                y_op[:, cols] = (
+                    y_opv.value[:, np.newaxis] if y_opv.value is not None else np.nan
+                )
             if "y_op_lim" in options:
-                y_op_lim[:, cols] = y_opv_lim.value[:, np.newaxis]
+                y_op_lim[:, cols] = (
+                    y_opv_lim.value[:, np.newaxis]
+                    if y_opv_lim.value is not None
+                    else np.nan
+                )
             if "r_op" in options:
-                r_op[:, cols] = r_opv.value[:, np.newaxis]
+                r_op[:, cols] = (
+                    r_opv.value[:, np.newaxis] if r_opv.value is not None else np.nan
+                )
             if "r_op_lim" in options:
-                r_op_lim[:, cols] = r_opv_lim.value[:, np.newaxis]
-
-        if "y_op" in options:
-            self.y_op = y_op
-        if "y_op_lim" in options:
-            self.y_op_lim = y_op_lim
-        if "r_op" in options:
-            self.r_op = r_op
-        if "r_op_lim" in options:
-            self.r_op_lim = r_op_lim
-
-        self.tag = (
-            tag
-            if tag is not None
-            else "".join(random.choice(string.ascii_letters) for i in range(5))
-        )
+                r_op_lim[:, cols] = (
+                    r_opv_lim.value[:, np.newaxis]
+                    if r_opv_lim.value is not None
+                    else np.nan
+                )
 
         return y_op, y_op_lim, r_op, r_op_lim
 
@@ -698,7 +729,11 @@ class Simulation:
 
     def plot_io(
         self, ax: matplotlib.axes.Axes | None = None, t: float = -1, save: bool = True
-    ) -> tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, list]:
+    ) -> tuple[
+        matplotlib.figure.Figure | matplotlib.figure.SubFigure,
+        matplotlib.axes.Axes,
+        list,
+    ]:
         """
         Plot the input-output of the network as a function of time.
 
@@ -715,7 +750,7 @@ class Simulation:
 
         Returns
         -------
-        fig: matplotlib.figure.Figure
+        fig: matplotlib.figure.Figure or matplotlib.figure.SubFigure
             Figure of the plot.
 
         ax: matplotlib.axes.Axes
@@ -796,13 +831,18 @@ class Simulation:
         fig = ax.get_figure()
         assert fig is not None
         if save:
+            assert type(fig) is matplotlib.figure.Figure
             _save_fig(fig, self.time_stamp + "-" + self.tag + "-io-plot.png")
 
         return fig, ax, artists
 
     def plot_spikes(
         self, ax: matplotlib.axes.Axes | None = None, t: float = -1, save: bool = True
-    ) -> tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, list]:
+    ) -> tuple[
+        matplotlib.figure.Figure | matplotlib.figure.SubFigure,
+        matplotlib.axes.Axes,
+        list,
+    ]:
         """
         Plot the spike events of the network as a function of time.
 
@@ -819,7 +859,7 @@ class Simulation:
 
         Returns
         -------
-        fig: matplotlib.figure.Figure
+        fig: matplotlib.figure.Figure or matplotlib.figure.SubFigure
             Figure of the plot.
 
         ax: matplotlib.axes.Axes
@@ -857,13 +897,18 @@ class Simulation:
         fig = ax.get_figure()
         assert fig is not None
         if save:
+            assert type(fig) is matplotlib.figure.Figure
             _save_fig(fig, self.time_stamp + "-" + self.tag + "-spikes-plot.png")
 
         return fig, ax, artists
 
     def plot_rates(
         self, ax: matplotlib.axes.Axes | None = None, t: float = -1, save: bool = True
-    ) -> tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, list]:
+    ) -> tuple[
+        matplotlib.figure.Figure | matplotlib.figure.SubFigure,
+        matplotlib.axes.Axes,
+        list,
+    ]:
         """
         Plot the rates of the network as a function of time.
 
@@ -880,7 +925,7 @@ class Simulation:
 
         Returns
         -------
-        fig: matplotlib.figure.Figure
+        fig: matplotlib.figure.Figure or matplotlib.figure.SubFigure
             Figure of the plot.
 
         ax: matplotlib.axes.Axes
@@ -951,6 +996,7 @@ class Simulation:
         fig = ax.get_figure()
         assert fig is not None
         if save:
+            assert type(fig) is matplotlib.figure.Figure
             _save_fig(fig, self.time_stamp + "-" + self.tag + "-rates-plot.png")
 
         return fig, ax, artists
@@ -1167,15 +1213,17 @@ class Simulation:
             artists[1][i].set_ydata(y[i, :])
 
         y_op, y_op_lim, _, _ = self._crop(t, "op")
+        k = 2
         if hasattr(self, "y_op"):
             for i in range(self.net.do):
-                artists[2][i].set_xdata(xaxis)
-                artists[2][i].set_ydata(y_op[i, :])
+                artists[k][i].set_xdata(xaxis)
+                artists[k][i].set_ydata(y_op[i, :])
+            k += 1
 
         if hasattr(self, "y_op_lim"):
             for i in range(self.net.do):
-                artists[3][i].set_xdata(xaxis)
-                artists[3][i].set_ydata(y_op_lim[i, :])
+                artists[k][i].set_xdata(xaxis)
+                artists[k][i].set_ydata(y_op_lim[i, :])
 
     def _animate_spikes(self, artists: list, t: float) -> None:
         """
@@ -1222,15 +1270,17 @@ class Simulation:
             artists[0][i].set_ydata(r[i, :])
 
         _, _, r_op, r_op_lim = self._crop(t, "op")
+        k = 1
         if hasattr(self, "r_op"):
             for i in range(self.net.N):
-                artists[1][i].set_xdata(xaxis)
-                artists[1][i].set_ydata(r_op[i, :])
+                artists[k][i].set_xdata(xaxis)
+                artists[k][i].set_ydata(r_op[i, :])
+            k += 1
 
         if hasattr(self, "r_op_lim"):
             for i in range(self.net.N):
-                artists[2][i].set_xdata(xaxis)
-                artists[2][i].set_ydata(r_op_lim[i, :])
+                artists[k][i].set_xdata(xaxis)
+                artists[k][i].set_ydata(r_op_lim[i, :])
 
     def _crop(self, t: float = -1, type: str = "io") -> tuple[np.ndarray, ...]:
         """

@@ -243,7 +243,7 @@ class EI_Network(Low_rank_LIF):
             angle_range = [np.pi / 4, 3 * np.pi / 4]
 
         assert (
-            np.abs(angle_range[1] - angle_range[0]) <= np.pi / 2
+            np.abs(angle_range[1] - angle_range[0]) <= np.pi
         ), "Angle range too large to mantain E/I"
         assert (NE != 0 and NI != 0) or not np.any(
             latent_sep == 1

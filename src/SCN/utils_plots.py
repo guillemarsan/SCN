@@ -37,6 +37,7 @@ def _gradient_line(y: np.ndarray, forget: bool = False) -> LineCollection:
         points = np.array([y[0, :], y[1, :], y[2, :]]).T.reshape(-1, 1, 3)
         segments = np.concatenate([points[:-1], points[1:]], axis=1)
         lc = Line3DCollection(list(segments), linewidths=2, norm=Normalize(0, 1))
+        lc._segments3d = segments  # type: ignore
 
     alphas = (
         np.concatenate([np.zeros(y.shape[1] - fsteps), np.linspace(0, 1, fsteps)])
@@ -235,6 +236,25 @@ def _get_colors(N: int, W: np.ndarray) -> list:
 def _compute_arrow_segments(
     point: np.ndarray, vector: np.ndarray, scale: float
 ) -> list:
+    """
+    Compute the segments for an arrow given a point, a vector, and a scale.
+
+    Parameters
+    ----------
+    point: np.ndarray (3,)
+        Point where the arrow starts.
+
+    vector: np.ndarray (3,)
+        Vector representing the direction of the arrow.
+
+    scale: float
+        Scale of the arrow.
+
+    Returns
+    -------
+    segments: list
+        List of segments for the arrow.
+    """
     # Calculate the arrowhead segments
 
     shaft_end = point + vector * scale

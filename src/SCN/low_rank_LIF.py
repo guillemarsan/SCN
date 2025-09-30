@@ -1,4 +1,5 @@
 import time
+from typing import Self
 
 import matplotlib.axes
 import matplotlib.figure
@@ -9,6 +10,7 @@ from mpl_toolkits.mplot3d import Axes3D
 from SCN import plot
 
 from .plot import _animate_big_vector, _plot_big_vector
+from .utils_neuro import _canon_symmetric
 from .utils_plots import (
     _get_colors,
     _line_closest_point,
@@ -115,6 +117,83 @@ class Low_rank_LIF:
         self.W = E @ D
         self.lamb = lamb
 
+    @classmethod
+    def init_optim(
+        cls,
+        Q: np.ndarray,
+        E: np.ndarray,
+        T: int | float | np.ndarray = 0.5,
+        di: int = 1,
+        Fseed: int | None = None,
+        lamb: float = 1,
+        spike_scale: int | float | np.ndarray = 1,
+    ) -> Self:
+        r"""
+        Optimization initialization of the Low-rank LIF network.
+
+        :math:`N` neurons spaced regularly between `angle_range[0]` and `angle_range[1]`.
+        The encoders are :math:`\mathbf{E}_i = (\cos(\alpha_i), \sin(\alpha_i))`.
+
+        Network associated with the optimization problem :math: `\text{optim}^Q_y \frac{1}{2} y^\top Q y \; \text{s.t.} \;
+        Ey \leq T - Fx`.
+
+        Parameters
+        ----------
+
+        Q: np.ndarray
+            Quadratic term of the optimization problem. Symmetric matrix.
+
+        E: np.ndarray
+            Linear coefficients of the problem constraints. Encoding weights of the network.
+
+        T: int | float | np.ndarray, default=0.5
+            Bias of the problem constraints. Threshold of the neurons.
+
+        di: int, default=1
+            Input dimensions.
+
+        Fseed: int | None, default=None
+            Seed for the random number generator for determining the sign of :math:`\mathbf{F}`.
+
+        lamb : float, default=1
+            Leak timescale of the network.
+
+        spike_scale : int, float or ndarray, default=1
+            Scale of the spikes.
+
+        Returns
+        -------
+        net: low_rank_LIF
+            low_rank_LIF network that is associated with the given optimization problem.
+        """
+
+        assert np.allclose(Q, Q.T), "Q needs to be symmetric"
+        assert (
+            E.shape[1] == Q.shape[0]
+        ), "E needs to have as many columns as the dimension of Q"
+        assert (
+            type(T) is not np.ndarray or T.shape[0] == E.shape[0]
+        ), "T has to be the same size as the number of constraints"
+
+        N = E.shape[0]
+
+        A, S = _canon_symmetric(Q)
+        negdef = -1 if np.all(np.diag(S) < 0) else 1
+        EAinv = E @ np.linalg.inv(A)
+        Coup = np.diag(1 - 2 * np.all(EAinv[:, np.diag(S) == 1] == 0, axis=1))
+
+        D = spike_scale * -negdef * np.linalg.inv(Q) @ E.T @ Coup
+
+        if Fseed is not None:
+            np.random.seed(Fseed)
+        F = np.random.choice([-1, 1], (N, di))
+
+        if type(T) in {int, float}:
+            T = np.full(N, T)
+
+        assert type(T) is np.ndarray
+        return cls(F, E, D, T, lamb)
+
     def plot(
         self,
         ax: matplotlib.axes.Axes | None = None,
@@ -123,6 +202,7 @@ class Low_rank_LIF:
         y: np.ndarray | None = None,
         y_op: np.ndarray | None = None,
         y_op_lim: np.ndarray | None = None,
+        centered: np.ndarray | None = None,
         save: bool = True,
     ) -> tuple[
         matplotlib.figure.Figure | matplotlib.figure.SubFigure,
@@ -154,6 +234,9 @@ class Low_rank_LIF:
         y_op_lim : ndarray of shape (do, time_steps), default=None
             Solution to the optimization problem with x(t) as input, in the limit of small spikes.
 
+        centered : np.ndarray | None, default=None
+            Center of the geometry for the plot. If None, it is estimated automatically.
+
         save : bool, default=True
             If True, the figure is saved.
 
@@ -168,6 +251,10 @@ class Low_rank_LIF:
         artists : list
             List of artists in the plot.
         """
+
+        assert centered is None or centered.shape == (
+            self.do,
+        ), "centered should be of shape (do,) or None"
 
         if ax is None:
             if self.do == 2:
@@ -190,12 +277,14 @@ class Low_rank_LIF:
         if I.ndim == 1:
             I = I[:, np.newaxis]
 
-        # Inhibitory standard
         x0 = x[:, -1]
         I0 = I[:, -1]
-        negT = self.T.copy()
-        negT[self.T > 0] = 0
-        centered = np.linalg.lstsq(self.E, negT - self.F @ x0 - I0, rcond=None)[0]
+
+        # Inhibitory standard
+        if centered is None:
+            negT = self.T.copy()
+            negT[self.T > 0] = 0
+            centered = np.linalg.lstsq(self.E, negT - self.F @ x0 - I0, rcond=None)[0]
 
         artists = []
 

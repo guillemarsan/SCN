@@ -9,12 +9,14 @@ import matplotlib.figure
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import numpy as np
+from gekko import GEKKO
 from matplotlib.animation import FuncAnimation
 from scipy.optimize import nnls
 
 from .autoencoder import Autoencoder
 from .low_rank_LIF import Low_rank_LIF
 from .utils_neuro import (
+    _canon_symmetric,
     _deintegrate,
     _integrate,
     _neurons_spiked_between,
@@ -463,6 +465,7 @@ class Simulation:
         net: Low_rank_LIF,
         x: np.ndarray,
         I: float | np.ndarray = 0.0,
+        Q: np.ndarray | None = None,
         options: list | None = None,
         tag: str | None = None,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -479,6 +482,9 @@ class Simulation:
 
         I : float or ndarray of shape (N, time_steps), default=0
             External input current.
+
+        Q : ndarray of shape (do,do), default=None
+            Matrix of the optimization. If None, it is inferred from the decoders and encoders.
 
         options : ndarray of str, default=None
             Options of the optimization. Subset of ['y_op', 'y_op_lim', 'r_op', 'r_op_lim']. If None, all are computed.
@@ -501,10 +507,17 @@ class Simulation:
             Rate optimum of the neurons with infinite rates / infinitesimal spikes.
         """
 
-        Q, residuals, _, _ = np.linalg.lstsq(net.D.T, -net.E, rcond=None)
-        assert np.allclose(
-            residuals, 0, atol=1e-10
-        ), "There must be a matrix such that QD = -E^T"
+        if Q is None:
+            Q, residuals, _, _ = np.linalg.lstsq(net.D.T, -net.E, rcond=None)
+            assert (
+                np.allclose(residuals, 0, atol=1e-10)
+                and np.allclose(Q, Q.T, atol=1e-10)
+                and np.all(np.linalg.eigvals(Q) >= 0)
+            ), "Q inference only possibe for convex case with N>=do: There must be a unique matrix Q such that Q sym, Q>0 and QD = -E^T"
+        else:
+            assert Q.shape[0] == net.do, "Q first dimension should be equal to do"
+            assert Q.shape[1] == net.do, "Q second dimension should be equal to do"
+            assert np.allclose(Q, Q.T, atol=1e-10), "Q should be symmetric"
 
         if options is None:
             options = ["y_op", "y_op_lim", "r_op", "r_op_lim"]
@@ -527,11 +540,12 @@ class Simulation:
         ):  # positive semidefinite -> convex optimization
             y_op, y_op_lim, r_op, r_op_lim = self._optimize_cvx(net, x, Q, I, options)
         else:
+            # not positive semidefinite -> non-convex optimization
             # TODO
-            # y_op, y_op_lim, r_op, r_op_lim = self._optimize_cvx_ccv(
-            #     net, x, Q, I, options
-            # )
-            raise ValueError("Non convex optimization not implemented yet")
+            y_op, y_op_lim, r_op, r_op_lim = self._optimize_cvx_ccv3(
+                net, x, Q, I, options
+            )
+            # raise ValueError("Non convex optimization not implemented yet")
 
         if "y_op" in options:
             self.y_op = y_op
@@ -570,7 +584,7 @@ class Simulation:
                 + net.E @ y_opv
                 + Ip
                 - net.T
-                + np.linalg.norm(net.D, axis=0) ** 2 / 2
+                + np.diag(net.D.T @ Q @ net.D) / 2
                 <= 0
             ]
             prob = cp.Problem(obj, constraints)
@@ -581,20 +595,18 @@ class Simulation:
             prob = cp.Problem(obj, constraints)
             probs.append(prob)
         if "r_op" in options:
-            # TODO Add the Q \neq Id case
             obj = cp.Minimize(
                 -2 * r_opv.T @ net.F @ xp
-                + cp.sum_squares(net.D @ r_opv)
-                + 2 * r_opv.T @ (net.T - Ip - np.linalg.norm(net.D, axis=0) ** 2 / 2)
+                + cp.quad_form(net.D @ r_opv, Q)
+                + 2 * r_opv.T @ (net.T - Ip - np.diag(net.D.T @ Q @ net.D) / 2)
             )
             constraints = [r_opv >= 0]
             prob = cp.Problem(obj, list(constraints))
             probs.append(prob)
         if "r_op_lim" in options:
-            # TODO Add the Q \neq Id case
             obj = cp.Minimize(
                 -2 * r_opv_lim.T @ net.F @ xp
-                + cp.sum_squares(net.D @ r_opv_lim)
+                + cp.quad_form(net.D @ r_opv_lim, Q)
                 + 2 * r_opv_lim.T @ (net.T - Ip)
             )
             constraints = [r_opv_lim >= 0]
@@ -640,11 +652,334 @@ class Simulation:
 
         return y_op, y_op_lim, r_op, r_op_lim
 
+    def _optimize_cvx_ccv3(self, net, x, Q, I, options):
+
+        x_values = np.unique(x, axis=1)
+
+        Q_norm = Q  # / Q[0, 0]
+        A, S = _canon_symmetric(Q_norm)
+        EAL = net.E @ np.linalg.pinv(A)
+
+        jump = np.diag(net.W)
+        C_op = net.T - I[:, 0] + jump / 2
+        C_op_lim = net.T - I[:, 0]
+
+        signs = np.diag(S)
+        maxs = np.sum(signs == -1)
+
+        rmax_idx = np.where(EAL[:, maxs:] == 0)[0]
+        rmin_idx = np.where(EAL[:, maxs:] != 0)[0]
+        rmaxs = rmax_idx.shape[0]
+        rmins = rmin_idx.shape[0]
+
+        probs = []
+        if "y_op" in options or "y_op_lim" in options:
+
+            def _prob_y_gen(C):
+                prob = GEKKO(remote=False)
+
+                z_max = prob.Array(prob.Var, maxs)
+                lamb = prob.Array(prob.Var, net.N)
+                z_min = prob.Array(prob.Var, net.do - maxs)
+                xp = prob.Array(prob.FV, net.di)
+
+                for i in range(net.N):
+                    prob.Equation(
+                        net.F[i, :] @ xp
+                        + EAL[i, :maxs] @ z_max
+                        + EAL[i, maxs:] @ z_min
+                        - C[i]
+                        <= 0
+                    )
+                    prob.Equation(lamb[i] >= 0)
+                    prob.Equation(
+                        lamb[i]
+                        * (
+                            net.F[i, :] @ xp
+                            + EAL[i, :maxs] @ z_max
+                            + EAL[i, maxs:] @ z_min
+                            - C[i]
+                        )
+                        == 0
+                    )
+                for i in range(net.do - maxs):
+                    prob.Equation(z_min[i] == -lamb @ EAL[:, maxs + i])
+
+                prob.Obj(
+                    sum([z_max[i] ** 2 for i in range(maxs)])
+                    - sum([z_min[i] ** 2 for i in range(net.do - maxs)])
+                )
+                return {"input": xp, "z_max": z_max, "z_min": z_min, "prob": prob}
+
+            if "y_op" in options:
+                # TODO Probably just have to change the definition of normD in C_op
+                prob_dict = _prob_y_gen(C_op)
+                prob_dict["name"] = "prob_y_op"
+                probs.append(prob_dict)
+            if "y_op_lim" in options:
+                prob_dict = _prob_y_gen(C_op_lim)
+                prob_dict["name"] = "prob_y_op_lim"
+                probs.append(prob_dict)
+
+        if "r_op" in options or "r_op_lim" in options:
+            # TODO
+            # raise ValueError(
+            #     "Non convex optimization not implemented yet for r and r_lim"
+            # )
+
+            def _prob_r_gen(C):
+                prob = GEKKO(remote=False)
+
+                if rmaxs == 0:  # all coupled constraints -> min r
+                    print("all coupled constraints")
+                    r = prob.Array(prob.Var, net.N)
+                    xp = prob.Array(prob.FV, net.di)
+
+                    for i in range(net.N):
+                        prob.Equation(-r[i] <= 0)
+
+                    quad = sum(
+                        [
+                            r[i] * net.W[i][j] * r[j]
+                            for i in range(net.N)
+                            for j in range(net.N)
+                        ]
+                    )
+                    cost = 2 * sum(
+                        [r[i] * (C[i] - net.F[i, :] @ xp) for i in range(net.N)]
+                    )
+                    prob.Obj(-quad + cost)
+                    return {"input": xp, "r": r, "prob": prob}
+                else:  # some uncoupled constraints -> min r_min (max r_max)
+                    r_max = prob.Array(prob.Var, rmaxs)
+                    lamb = prob.Array(prob.Var, rmaxs)
+                    r_min = prob.Array(prob.Var, rmins)
+                    xp = prob.Array(prob.FV, net.di)
+
+                    for i in range(rmaxs):
+                        prob.Equation(-r_max[i] <= 0)
+                        prob.Equation(lamb[i] >= 0)
+                        prob.Equation(-lamb[i] * r_max[i] == 0)
+
+                        imax = rmax_idx[i]
+                        prob.Equation(
+                            -2
+                            * sum(
+                                [
+                                    r_min[j] * net.W[rmin_idx[j], imax]
+                                    for j in range(rmins)
+                                ]
+                            )
+                            + 2
+                            * sum(
+                                [
+                                    r_max[j] * net.W[rmax_idx[j], imax]
+                                    for j in range(rmaxs)
+                                ]
+                            )
+                            - 2 * (C[imax] - net.F[imax, :] @ xp)
+                            + lamb[i]
+                            == 0
+                        )
+
+                    for i in range(rmins):
+                        prob.Equation(-r_min[i] <= 0)
+
+                    quad_minmin = sum(
+                        [
+                            r_min[i] * net.W[rmin_idx[i], rmin_idx[j]] * r_min[j]
+                            for i in range(rmins)
+                            for j in range(rmins)
+                        ]
+                    )
+                    quad_minmax = sum(
+                        [
+                            r_min[i] * net.W[rmin_idx[i], rmax_idx[j]] * r_max[j]
+                            for i in range(rmins)
+                            for j in range(rmaxs)
+                        ]
+                    )
+                    quad_maxmax = sum(
+                        [
+                            r_max[i] * net.W[rmax_idx[i], rmax_idx[j]] * r_max[j]
+                            for i in range(rmaxs)
+                            for j in range(rmaxs)
+                        ]
+                    )
+                    cost_min = 2 * sum(
+                        [
+                            r_min[i] * (C[rmin_idx[i]] - net.F[rmin_idx[i], :] @ xp)
+                            for i in range(rmins)
+                        ]
+                    )
+                    cost_max = 2 * sum(
+                        [
+                            r_max[i] * (C[rmax_idx[i]] - net.F[rmax_idx[i], :] @ xp)
+                            for i in range(rmaxs)
+                        ]
+                    )
+                    prob.Obj(
+                        -quad_minmin
+                        - 2 * quad_minmax
+                        + quad_maxmax
+                        + cost_min
+                        - cost_max
+                    )
+                    return {"input": xp, "r_max": r_max, "r_min": r_min, "prob": prob}
+
+            if "r_op" in options:
+                # TODO Probably just have to change the definition of normD in C_op
+                prob_dict = _prob_r_gen(C_op)
+                prob_dict["name"] = "prob_r_op"
+                probs.append(prob_dict)
+            if "r_op_lim" in options:
+                prob_dict = _prob_r_gen(C_op_lim)
+                prob_dict["name"] = "prob_r_op_lim"
+                probs.append(prob_dict)
+
+        y_op = np.zeros((net.do, x.shape[1]))
+        y_op_lim = np.zeros((net.do, x.shape[1]))
+        r_op = np.zeros((net.N, x.shape[1]))
+        r_op_lim = np.zeros((net.N, x.shape[1]))
+        for j in range(x_values.shape[1]):
+            cols = np.where(np.all(x == x_values[:, j : j + 1], axis=0))[0]
+
+            for prob_dict in probs:
+                for i in range(net.di):
+                    prob_dict["input"][i].value = x_values[i, j]
+
+                # initial guess
+                if prob_dict["name"] in {"prob_y_op", "prob_y_op_lim"}:
+                    if hasattr(
+                        self, "y"
+                    ):  # initialize guess near last y with this input
+                        y_init = self.y[:, cols[-1]]
+                    else:  # initialize at least in feasible region
+                        y_init = np.linalg.lstsq(
+                            net.E, C_op + net.F @ x_values[:, j] - 1e-2, rcond=None
+                        )[0]
+                    z_init = A @ y_init
+                    z_max_init = z_init[:maxs]
+                    z_min_init = z_init[maxs:]
+                    for i in range(maxs):
+                        prob_dict["z_max"][i].value = z_max_init[i]
+                    for i in range(net.do - maxs):
+                        prob_dict["z_min"][i].value = z_min_init[i]
+
+                if prob_dict["name"] in {"prob_r_op", "prob_r_op_lim"}:
+                    if hasattr(
+                        self, "r"
+                    ):  # initialize guess near last r with this input
+                        r_init = self.r[:, cols[-1]]
+                    else:  # initialize at least in feasible region
+                        r_init = 1e-2 * np.ones(net.N)
+                    if rmaxs == 0:
+                        for i in range(net.N):
+                            prob_dict["r"][i].value = r_init[i]
+                    else:
+                        r_max_init = r_init[rmax_idx]
+                        r_min_init = r_init[rmin_idx]
+                        for i in range(rmaxs):
+                            prob_dict["r_max"][i].value = r_max_init[i]
+                        for i in range(net.do - rmaxs):
+                            prob_dict["r_min"][i].value = r_min_init[i]
+
+                prob = prob_dict["prob"]
+                fail = False
+                prob.options.SOLVER = 1
+                try:
+                    prob.solve(disp=True)
+                    # i = 0
+                    # prob.solve(warm_start=False)
+                    # # if i == 2:
+                    # #     k = 0
+                    # #     while (
+                    # #         not np.all((r_opv.value > 0.5) + (r_opv.value < 1e-6)) and k < 3
+                    # #     ):
+                    # #         idx = np.where((r_opv.value > 1e-6) * (r_opv.value < 0.5))
+                    # #         newprob = cp.Problem(
+                    # #             prob.objective, prob.constraints + [r_opv[idx] == 0]
+                    # #         )
+                    # #         newprob.solve(warm_start=False)
+                    # #         k += 1
+                    # i += 1
+                except BaseException:
+                    fail = True
+
+                if prob_dict["name"] == "prob_y_op":
+                    if not fail:
+                        z_max = np.array(
+                            [prob_dict["z_max"][i].value for i in range(maxs)]
+                        )
+                        z_min = np.array(
+                            [prob_dict["z_min"][i].value for i in range(net.do - maxs)]
+                        )
+                        y_op_val = np.linalg.pinv(A) @ np.vstack((z_max, z_min))
+                        y_op[:, cols] = y_op_val
+                    else:
+                        y_op[:, cols] = np.nan
+                if prob_dict["name"] == "prob_y_op_lim":
+                    if not fail:
+                        z_max = np.array(
+                            [prob_dict["z_max"][i].value for i in range(maxs)]
+                        )
+                        z_min = np.array(
+                            [prob_dict["z_min"][i].value for i in range(net.do - maxs)]
+                        )
+                        y_op_lim_val = np.linalg.pinv(A) @ np.vstack((z_max, z_min))
+                        y_op_lim[:, cols] = y_op_lim_val
+                    else:
+                        y_op_lim[:, cols] = np.nan
+                if prob_dict["name"] == "prob_r_op":
+                    if not fail:
+                        if rmaxs == 0:
+                            r_op[:, cols] = np.array(
+                                [prob_dict["r"][i].value for i in range(net.N)]
+                            )
+                        else:
+                            r_max = np.array(
+                                [prob_dict["r_max"][i].value for i in range(maxs)]
+                            )
+                            r_min = np.array(
+                                [
+                                    prob_dict["r_min"][i].value
+                                    for i in range(net.do - maxs)
+                                ]
+                            )
+                            r_op[rmax_idx, cols] = r_max
+                            r_op[rmin_idx, cols] = r_min
+                    else:
+                        r_op[:, cols] = np.nan
+
+                if prob_dict["name"] == "prob_r_op_lim":
+                    if not fail:
+                        if rmaxs == 0:
+                            r_op_lim[:, cols] = np.array(
+                                [prob_dict["r"][i].value for i in range(net.N)]
+                            )
+                        else:
+                            r_max = np.array(
+                                [prob_dict["r_max"][i].value for i in range(maxs)]
+                            )
+                            r_min = np.array(
+                                [
+                                    prob_dict["r_min"][i].value
+                                    for i in range(net.do - maxs)
+                                ]
+                            )
+                            r_op_lim[rmax_idx, cols] = r_max
+                            r_op_lim[rmin_idx, cols] = r_min
+                    else:
+                        r_op_lim[:, cols] = np.nan
+
+        return y_op, y_op_lim, r_op, r_op_lim
+
     # PLOTTING ####
 
     def plot(
         self,
         geometry: bool = True,
+        centergeom: np.ndarray | None = None,
         rate_space: bool = True,
         save: bool = True,
     ) -> tuple[matplotlib.figure.Figure, list, list]:
@@ -655,6 +990,9 @@ class Simulation:
         ----------
         geometry : bool, default=True
             If False, do not plot the geometry of the network.
+
+        centergeom : np.ndarray | None, default=None
+            Center of the geometry for the plot. If None, it is estimated automatically.
 
         rate_space : bool, default=True
             If False, do not plot the rate space of the network.
@@ -678,6 +1016,9 @@ class Simulation:
 
         geometry = geometry and self.net.do in {2, 3}
         rate_space = rate_space and self.net.N in {2, 3}
+        assert centergeom is None or centergeom.shape == (
+            self.net.do,
+        ), "centergeom should be of shape (do,) or None"
 
         if geometry and rate_space:
             gs = gridspec.GridSpec(3, 3)
@@ -737,6 +1078,7 @@ class Simulation:
                 I=self.I,
                 y_op=y_op,
                 y_op_lim=y_op_lim,
+                centered=centergeom,
                 save=False,
             )
             artists.append(artists_net)
@@ -756,7 +1098,7 @@ class Simulation:
 
         plt.tight_layout()
         if save:
-            _save_fig(fig, self.time_stamp + "-" + self.tag + "-plot.png")
+            _save_fig(fig, self.time_stamp + "-" + self.tag + "-plot.svg")
 
         return fig, axes, artists
 

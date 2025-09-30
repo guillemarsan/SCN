@@ -183,7 +183,7 @@ def _save_ani(
     plt.rcParams["animation.ffmpeg_path"] = "/Program Files/ffmpeg/bin/ffmpeg"
     ani.save(
         path + name,
-        writer="ffmpeg",
+        writer="pillow",
         fps=anim_freq,
     )
 

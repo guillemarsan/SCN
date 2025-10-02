@@ -435,6 +435,104 @@ class Low_rank_LIF:
 
         return fig, ax, artists
 
+    def plot_vol_space(
+        self,
+        x: np.ndarray | None = None,
+        I: np.ndarray | None = None,
+        ax: matplotlib.axes.Axes | None = None,
+        V: np.ndarray | None = None,
+        voltage_biased: bool = False,
+        save: bool = True,
+    ) -> tuple[
+        matplotlib.figure.Figure | matplotlib.figure.SubFigure,
+        matplotlib.axes.Axes,
+        list,
+    ]:
+        """
+        Plot the network in voltage space: boundaries (and trajectories). Only for N = 2 or 3 neurons.
+
+        If V is passed, this is also plotted as a trajectory.
+
+        Parameters
+        ----------
+
+        x : ndarray of shape (di, time_steps), default=None
+            Input to the network.
+
+        I : ndarray of shape (N, time_steps), default=None
+            Input current to the neurons.
+
+        ax : matplotlib.axes.Axes, default=None
+            Axes to plot to. If None, a new figure is created.
+
+        V : ndarray of shape (N, time_steps), default=None
+            Voltages trajectory to plot.
+
+        voltage_biased : bool, default=False
+            If True, the thresholds do not change with Fx + I but the voltage is biased.
+
+        save : bool, default=True
+            If True, the figure is saved.
+
+        Returns
+        -------
+        fig : matplotlib.figure.Figure or matplotlib.figure.SubFigure
+            Figure of the plot.
+
+        ax : matplotlib.axes.Axes
+            Axes of the plot.
+
+        artists : list
+            List of artists in the plot.
+        """
+
+        if ax is None:
+            ax = plt.figure(figsize=(10, 10)).gca()
+
+        if x is None:
+            x = np.zeros((self.di, 1))
+        if x.ndim == 1:
+            x = x[:, np.newaxis]
+        if V is not None and V.ndim == 1:
+            V = V[:, np.newaxis]
+
+        if I is None:
+            I = np.zeros((self.N, 1))
+        if I.ndim == 1:
+            I = I[:, np.newaxis]
+
+        x0 = x[:, -1]
+        I0 = I[:, -1]
+
+        artists = []
+
+        # plot the network
+        if self.N in {2, 3}:
+            artists = (
+                self._draw_vol_space_2D(x0, I0, ax, voltage_biased)
+                if self.N == 2
+                else self._draw_vol_space_3D(x0, I0, ax, voltage_biased)
+            )
+            # V Trajectory
+            if V is not None:
+                artists_V = plot._plot_traj(ax, V, gradient=True)
+                artists.append(artists_V)
+                artists_leak = plot._plot_small_vector(ax, V[:, -1], -V[:, -1])
+                artists.append(artists_leak)
+        else:
+            raise NotImplementedError(
+                "Only N=2 or 3 neurons voltage vis. plot is possible"
+            )
+
+        fig = ax.get_figure()
+        assert fig is not None
+        if save:
+            assert type(fig) is matplotlib.figure.Figure
+            time_stamp = time.strftime("%Y%m%d-%H%M%S")
+            _save_fig(fig, time_stamp + "-voltage-space.png")
+
+        return fig, ax, artists
+
     def _animate(
         self,
         ax: matplotlib.axes.Axes,
@@ -492,7 +590,7 @@ class Low_rank_LIF:
 
         plot._animate_traj(ax, artists[-2 - offset], y)
         plot._animate_small_vector(artists[-1 - offset], y[:, -1], -y[:, -1])
-        if spiking is not None:
+        if spiking is not None and len(spiking) > 0:
             plot._animate_spiking(artists, spiking)
         if input_change or current_change:
             x0 = x[:, -1]
@@ -568,7 +666,7 @@ class Low_rank_LIF:
 
         plot._animate_traj(ax, artists[-2 - offset], r)
         plot._animate_small_vector(artists[-1 - offset], r[:, -1], -r[:, -1])
-        if spiking is not None:
+        if spiking is not None and len(spiking) > 0:
             plot._animate_spiking(artists, spiking)
         if input_change or current_change:
             x0 = x[:, -1]
@@ -582,6 +680,66 @@ class Low_rank_LIF:
                 plot._animate_scatter(artists[-offset], r_op[:, -1:])
             if r_op_lim is not None:
                 plot._animate_scatter(artists[-1], r_op_lim[:, -1:])
+
+    def _animate_vol_space(
+        self,
+        ax: matplotlib.axes.Axes,
+        artists: list,
+        x: np.ndarray,
+        I: np.ndarray,
+        V: np.ndarray,
+        input_change: bool = False,
+        current_change: bool = False,
+        spiking: np.ndarray | None = None,
+        voltage_biased: bool = False,
+    ) -> None:
+        """
+        Animate the voltage space by modifying the artists.
+
+        Parameters
+        ----------
+        ax : matplotlib.axes.Axes
+            Axes to plot to.
+
+        artists : list
+            List of artists to modify.
+
+        x : ndarray of shape (di, time_steps)
+            Input trajectory to plot.
+
+        I : ndarray of shape (N, time_steps)
+            Input current to the neurons.
+
+        V : ndarray of shape (N, time_steps)
+            Voltage trajectory to plot.
+
+        input_change: bool, default=False
+            If True, the input has changed.
+
+        current_change: bool, default=False
+            If True, the input current has changed.
+
+        spiking : ndarray(int), default=None
+            Neurons spiking in this frame. Index starting at 1. -n if the neuron needs to be restored.
+
+        voltage_biased : bool, default=False
+            If True, the thresholds do not change with Fx + I but the voltage is biased.
+        """
+
+        offset = 0
+
+        plot._animate_traj(ax, artists[-2 - offset], V)
+        plot._animate_small_vector(artists[-1 - offset], V[:, -1], -V[:, -1])
+        if spiking is not None and len(spiking) > 0:
+            plot._animate_spiking(artists, spiking)
+        if input_change or current_change:
+            x0 = x[:, -1]
+            I0 = I[:, -1]
+            (
+                self._draw_vol_space_2D(x0, I0, ax, voltage_biased, artists)
+                if self.N == 2
+                else self._draw_vol_space_3D(x0, I0, ax, voltage_biased, artists)
+            )
 
     def _draw_bbox_2D(
         self,
@@ -1151,11 +1309,246 @@ class Low_rank_LIF:
                 _animate_big_vector(artists[n][1], q, vector, on=bool(np.all(q >= 0)))
 
         ax.set_xlim(0, maxinter + 1)
-        ax.set_ylim(0, maxinter + 1)
+        ax.set_ylim(maxinter + 1, 0)
         ax.set_zlim(0, maxinter + 1)
         ax.set_zlabel("r3")
         ax.set_ylabel("r2")
         ax.set_xlabel("r1")
+        ax.set_aspect("equal")
+
+        return artists
+
+    def _draw_vol_space_2D(
+        self,
+        x0: np.ndarray,
+        I0: np.ndarray,
+        ax: matplotlib.axes.Axes,
+        voltage_biased: bool = False,
+        artists: list | None = None,
+    ) -> list:
+        """
+        Draw the voltage space visualization of the network. For N = 2 neurons.
+
+        Parameters
+        ----------
+
+        x0 : ndarray of shape (di,)
+            Input of the network.
+
+        I0 : ndarray of shape (N,)
+            Input currents of the neurons.
+
+        ax : matplotlib.axes.Axes
+            Axes to plot the network.
+
+        voltage_biased : bool, default=False
+            If True, the thresholds do not change with Fx + I but the voltage is biased.
+
+        artists : list, default = None
+            List of artists to update the plot. If None, new artists are created.
+
+        Returns
+        -------
+        artists : list
+            List of artists to update the plot.
+
+        """
+
+        first_frame = artists is None
+        if first_frame:
+            artists = []
+
+        colors = _get_colors(self.N, self.W)
+
+        corner = self.T - self.F @ x0 - I0 if not voltage_biased else self.T
+        rext = corner[0] + 0.25
+        lext = corner[0] - 1.75
+        uext = corner[1] + 0.25
+        dext = corner[1] - 1.75
+        for n in range(self.N):
+
+            if n == 0:
+                y2x = np.linspace(dext, uext, 100)
+                y1x = np.ones(100) * corner[0]
+            else:
+                y1x = np.linspace(lext, rext, 100)
+                y2x = np.ones(100) * corner[1]
+
+            # polygon (to optimize: no redraw)
+            if not first_frame:
+                artists[n][0].remove()
+            if n == 0:
+                poly = ax.fill_betweenx(
+                    y2x,
+                    corner[0],
+                    rext,
+                    color=colors[n],
+                    interpolate=True,
+                    alpha=0.2,
+                    zorder=n,
+                )
+            else:
+                poly = ax.fill_between(
+                    y1x,
+                    corner[1],
+                    uext,
+                    color=colors[n],
+                    interpolate=True,
+                    alpha=0.2,
+                    zorder=n,
+                )
+            if not first_frame:
+                artists[n][0] = poly
+
+            # line
+            line = None
+
+            if first_frame:
+                line = ax.plot(y1x, y2x, linewidth=3, c=colors[n], zorder=n)[0]
+            else:
+                artists[n][1].set_xdata(y1x)
+                artists[n][1].set_ydata(y2x)
+
+            # quiver
+            quiver = None
+            q = np.zeros(2)
+            q[0] = corner[0] if n == 0 else lext + 1
+            q[1] = corner[1] if n == 1 else dext + 1
+            if first_frame:
+                quiver = _plot_big_vector(ax, q, self.W[:, n], color=colors[n])
+                artists.append([poly, line, quiver])
+            else:
+                _animate_big_vector(artists[n][2], q, self.W[:, n])
+
+        ax.hlines(0, lext, rext, color="k")
+        ax.vlines(0, dext, uext, color="k")
+        ax.set_xlim(lext, rext)
+        ax.set_ylim(dext, uext)
+        ax.set_ylabel("V2")
+        ax.set_xlabel("V1")
+        ax.set_aspect("equal")
+
+        return artists
+
+    def _draw_vol_space_3D(
+        self,
+        x0: np.ndarray,
+        I0: np.ndarray,
+        ax: matplotlib.axes.Axes,
+        voltage_biased: bool = False,
+        artists: list | None = None,
+    ) -> list:
+        """
+        Draw the voltage space visualization of the network. For N = 3 neurons.
+
+        Parameters
+        ----------
+
+        x0 : ndarray of shape (di,)
+            Input of the network.
+
+        I0 : ndarray of shape (N,)
+            Input currents of the neurons.
+
+        ax : matplotlib.axes.Axes
+            Axes to plot the network.
+
+        voltage_biased : bool, default=False
+            If True, the thresholds do not change with Fx + I but the voltage is biased.
+
+        artists : list, default = None
+            List of artists to update the plot. If None, new artists are created.
+
+        Returns
+        -------
+        artists : list
+            List of artists to update the plot.
+
+        """
+
+        assert isinstance(ax, Axes3D)
+
+        first_frame = artists is None
+        if first_frame:
+            artists = []
+
+        colors = _get_colors(self.N, self.W)
+
+        corner = self.T - self.F @ x0 - I0 if not voltage_biased else self.T
+        rext = corner[0]
+        lext = corner[0] - 1.75
+        uext = corner[1]
+        dext = corner[1] - 1.75
+        iext = corner[2]
+        oext = corner[2] - 1.75
+        y1x = np.linspace(lext, rext, 100)
+        y2x = np.linspace(dext, uext, 100)
+        y3x = np.linspace(oext, iext, 100)
+
+        Edir = np.cross(self.E[:, 0], self.E[:, 1])
+        X, Y = np.meshgrid(y1x, y2x)
+        Z = Edir[0] * X + Edir[1] * Y / Edir[2]
+        ax.plot_surface(
+            X,
+            Y,
+            Z,
+            color="k",
+            alpha=0.05,
+            zorder=-1,
+        )
+
+        for n in range(self.N):
+            q = np.zeros(3)
+            match n:
+                case 0:
+                    Y, Z = np.meshgrid(y2x, y3x)
+                    X = corner[0] * np.ones_like(Y)
+                    q[0] = corner[0]
+                    q[1] = dext + 1
+                    q[2] = oext + 1
+                case 1:
+                    X, Z = np.meshgrid(y1x, y3x)
+                    Y = corner[1] * np.ones_like(X)
+                    q[0] = lext + 1
+                    q[1] = corner[1]
+                    q[2] = oext + 1
+                case 2:
+                    X, Y = np.meshgrid(y1x, y2x)
+                    Z = corner[2] * np.ones_like(X)
+                    q[0] = lext + 1
+                    q[1] = dext + 1
+                    q[2] = corner[2]
+                case _:
+                    raise ValueError("Invalid case")
+
+            # polygon (to optimize: no redraw)
+            if not first_frame:
+                artists[n][0].remove()
+            poly = ax.plot_surface(
+                X,
+                Y,
+                Z,
+                color=colors[n],
+                alpha=0.2,
+                zorder=n,
+            )
+            if not first_frame:
+                artists[n][0] = poly
+
+            # quiver
+            quiver = None
+            if first_frame:
+                quiver = _plot_big_vector(ax, q, self.W[:, n], color=colors[n])
+                artists.append([poly, quiver])
+            else:
+                _animate_big_vector(artists[n][1], q, self.W[:, n])
+
+        ax.set_xlim(lext, rext)
+        ax.set_ylim(dext, uext)
+        ax.set_zlim(oext, iext)
+        ax.set_zlabel("V3")
+        ax.set_ylabel("V2")
+        ax.set_xlabel("V1")
         ax.set_aspect("equal")
 
         return artists

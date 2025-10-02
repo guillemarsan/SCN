@@ -107,6 +107,7 @@ class Simulation:
         I: float | np.ndarray = 0.0,
         draw_break: str = "no",
         criterion: str = "max",
+        voltage_biased: bool = False,
         dt: float = 0.001,
         Tmax: float = 10,
         c: np.ndarray | None = None,
@@ -148,6 +149,10 @@ class Simulation:
             - 'rand': neuron is chosen randomly
             - 'inh_max': neuron with the highest voltage spikes (all inhibitory priority)
             - 'inh_rand': neuron is chosen randomly (all inhibitory priority)
+
+        voltage_biased : bool, default=False
+            If True, the voltage is biased by Fc(t) + I(t).
+            If False, the threshold is biased by -Fx(t) - I(t).
 
         dt : float, default=0.001
             Time step of the simulation (s).
@@ -213,6 +218,7 @@ class Simulation:
         self.I = I
         self.draw_break = draw_break
         self.criterion = criterion
+        self.voltage_biased = voltage_biased
         self.dt = dt
         self.Tmax = Tmax
 
@@ -229,15 +235,25 @@ class Simulation:
                 raise Warning("y0 was given and prioritized over r0 and V0")
             r0, res = nnls(self.net.D, y0)
             assert r0 is not None and res < 1e-6, "failed to compute r0 with nnls"
-            V0 = self.net.F @ x[:, 0] + self.net.E @ y0 + I[:, 0]
+            V0 = (
+                self.net.E @ y0 + self.net.F @ x[:, 0] + I[:, 0]
+                if voltage_biased
+                else self.net.E @ y0
+            )
         elif r0 is not None:
             if V0 is not None:
                 raise Warning("r0 was given and prioritized over V0")
             y0 = self.net.D @ r0
-            V0 = self.net.F @ x[:, 0] + self.net.E @ y0 + I[:, 0]
+            V0 = (
+                self.net.F @ x[:, 0] + self.net.E @ y0 + I[:, 0]
+                if voltage_biased
+                else self.net.E @ y0
+            )
         elif V0 is not None:
             y0 = np.linalg.lstsq(
-                self.net.E, (V0 - self.net.F @ x[:, 0] - I[:, 0]), rcond=None
+                self.net.E,
+                (V0 - self.net.F @ x[:, 0] - I[:, 0]) if voltage_biased else V0,
+                rcond=None,
             )[0]
             r0 = np.linalg.lstsq(self.net.D, y0, rcond=None)[0]
         else:
@@ -245,12 +261,20 @@ class Simulation:
                 y0 = x[:, 0]
                 r0 = nnls(self.net.D, y0)[0]
                 assert r0 is not None, "failed to compute r0 with nnls"
-                V0 = self.net.F @ x[:, 0] + self.net.E @ y0 + I[:, 0]
+                V0 = (
+                    self.net.F @ x[:, 0] + self.net.E @ y0 + I[:, 0]
+                    if voltage_biased
+                    else self.net.E @ y0
+                )
             else:
                 # TODO Start within the subthreshold area
                 y0 = np.zeros(self.net.do)
                 r0 = np.zeros(self.net.N)
-                V0 = self.net.F @ x[:, 0] + self.net.E @ y0 + I[:, 0]
+                V0 = (
+                    self.net.F @ x[:, 0] + self.net.E @ y0 + I[:, 0]
+                    if voltage_biased
+                    else self.net.E @ y0
+                )
 
         self.y0 = y0
         self.r0 = r0
@@ -309,15 +333,33 @@ class Simulation:
         V[:, 0] = self.V0
         r[:, 0] = self.r0
 
-        for t in range(time_steps - 1):
-            s[:, t][np.where(V[:, t] > self.net.T)] = 1
-            V[:, t + 1] = (
-                V[:, t]
-                + self.dt
-                * (-self.net.lamb * V[:, t] + self.net.F @ self.c[:, t] + self.I[:, t])
-                + self.net.W @ s[:, t]
-            )
-            r[:, t + 1] = r[:, t] + self.dt * (-self.net.lamb * r[:, t]) + s[:, t]
+        if self.voltage_biased:
+            for t in range(time_steps - 1):
+                s[:, t][np.where(V[:, t] > self.net.T)] = 1
+                V[:, t + 1] = (
+                    V[:, t]
+                    + self.dt
+                    * (
+                        -self.net.lamb * V[:, t]
+                        + self.net.F @ self.c[:, t]
+                        + self.I[:, t]
+                    )
+                    + self.net.W @ s[:, t]
+                )
+                r[:, t + 1] = r[:, t] + self.dt * (-self.net.lamb * r[:, t]) + s[:, t]
+        else:
+            for t in range(time_steps - 1):
+                s[:, t][
+                    np.where(
+                        V[:, t] > self.net.T - self.net.F @ self.x[:, t] - self.I[:, t]
+                    )
+                ] = 1
+                V[:, t + 1] = (
+                    V[:, t]
+                    + self.dt * (-self.net.lamb * V[:, t])
+                    + self.net.W @ s[:, t]
+                )
+                r[:, t + 1] = r[:, t] + self.dt * (-self.net.lamb * r[:, t]) + s[:, t]
 
         y = self.net.D @ r
         return y, r, s, V
@@ -352,18 +394,31 @@ class Simulation:
         V[:, 0] = self.V0
         r[:, 0] = self.r0
 
-        for t in range(time_steps - 1):
-            candidates = np.where(V[:, t] > self.net.T)[0]
-            while len(candidates) > 0:
-                idx = self._idx_choose(V[:, t], candidates)
-                s[idx, t] = 1
-                V[:, t] = V[:, t] + self.net.W[:, idx]
+        if self.voltage_biased:
+            for t in range(time_steps - 1):
                 candidates = np.where(V[:, t] > self.net.T)[0]
+                while len(candidates) > 0:
+                    idx = self._idx_choose(V[:, t], self.net.T, candidates)
+                    s[idx, t] = 1
+                    V[:, t] = V[:, t] + self.net.W[:, idx]
+                    candidates = np.where(V[:, t] > self.net.T)[0]
 
-            V[:, t + 1] = V[:, t] + self.dt * (
-                -self.net.lamb * V[:, t] + self.net.F @ self.c[:, t] + self.I[:, t]
-            )
-            r[:, t + 1] = r[:, t] + self.dt * (-self.net.lamb * r[:, t]) + s[:, t]
+                V[:, t + 1] = V[:, t] + self.dt * (
+                    -self.net.lamb * V[:, t] + self.net.F @ self.c[:, t] + self.I[:, t]
+                )
+                r[:, t + 1] = r[:, t] + self.dt * (-self.net.lamb * r[:, t]) + s[:, t]
+        else:
+            for t in range(time_steps - 1):
+                effthresh = self.net.T - self.net.F @ self.x[:, t] - self.I[:, t]
+                candidates = np.where(V[:, t] > effthresh)[0]
+                while len(candidates) > 0:
+                    idx = self._idx_choose(V[:, t], effthresh, candidates)
+                    s[idx, t] = 1
+                    V[:, t] = V[:, t] + self.net.W[:, idx]
+                    candidates = np.where(V[:, t] > effthresh)[0]
+
+                V[:, t + 1] = V[:, t] + self.dt * (-self.net.lamb * V[:, t])
+                r[:, t + 1] = r[:, t] + self.dt * (-self.net.lamb * r[:, t]) + s[:, t]
 
         y = self.net.D @ r
         return y, r, s, V
@@ -398,24 +453,45 @@ class Simulation:
         V[:, 0] = self.V0
         r[:, 0] = self.r0
 
-        for t in range(time_steps - 1):
-            candidates = np.where(V[:, t] > self.net.T)[0]
-            if len(candidates) > 0:
-                idx = self._idx_choose(V[:, t], candidates)
-                s[idx, t] = 1
+        if self.voltage_biased:
+            for t in range(time_steps - 1):
+                candidates = np.where(V[:, t] > self.net.T)[0]
+                if len(candidates) > 0:
+                    idx = self._idx_choose(V[:, t], candidates, self.net.T)
+                    s[idx, t] = 1
 
-            V[:, t + 1] = (
-                V[:, t]
-                + self.dt
-                * (-self.net.lamb * V[:, t] + self.net.F @ self.c[:, t] + self.I[:, t])
-                + self.net.W @ s[:, t]
-            )
-            r[:, t + 1] = r[:, t] + self.dt * (-self.net.lamb * r[:, t]) + s[:, t]
+                V[:, t + 1] = (
+                    V[:, t]
+                    + self.dt
+                    * (
+                        -self.net.lamb * V[:, t]
+                        + self.net.F @ self.c[:, t]
+                        + self.I[:, t]
+                    )
+                    + self.net.W @ s[:, t]
+                )
+                r[:, t + 1] = r[:, t] + self.dt * (-self.net.lamb * r[:, t]) + s[:, t]
+        else:
+            for t in range(time_steps - 1):
+                effthresh = self.net.T - self.net.F @ self.x[:, t] - self.I[:, t]
+                candidates = np.where(V[:, t] > effthresh)[0]
+                if len(candidates) > 0:
+                    idx = self._idx_choose(V[:, t], effthresh, candidates)
+                    s[idx, t] = 1
+
+                V[:, t + 1] = (
+                    V[:, t]
+                    + self.dt * (-self.net.lamb * V[:, t])
+                    + self.net.W @ s[:, t]
+                )
+                r[:, t + 1] = r[:, t] + self.dt * (-self.net.lamb * r[:, t]) + s[:, t]
 
         y = self.net.D @ r
         return y, r, s, V
 
-    def _idx_choose(self, V: np.ndarray, candidates: np.ndarray) -> int:
+    def _idx_choose(
+        self, V: np.ndarray, effthresh: np.ndarray, candidates: np.ndarray
+    ) -> int:
         """
         Choose the neuron to spike in case of draw.
 
@@ -423,6 +499,9 @@ class Simulation:
         ----------
         V : np.ndarray
             Voltage of the neurons.
+
+        effthresh : np.ndarray
+            Effective threshold of the neurons.
 
         candidates : np.ndarray
             Neurons that can spike.
@@ -435,16 +514,16 @@ class Simulation:
 
         match self.criterion:
             case "max":
-                idx = int(np.argmax(V - self.net.T))
+                idx = int(np.argmax(V - effthresh))
             case "rand":
                 idx = np.random.choice(candidates)
             case "inh_max":
                 inh = np.argwhere(np.all(self.net.W < 0, axis=0)).flatten()
                 inh_cand = np.intersect1d(candidates, inh)
                 if len(inh_cand) > 0:
-                    idx = inh_cand[np.argmax(V[inh_cand] - self.net.T[inh_cand])]
+                    idx = inh_cand[np.argmax(V[inh_cand] - effthresh[inh_cand])]
                 else:
-                    idx = int(np.argmax(V - self.net.T))
+                    idx = int(np.argmax(V - effthresh))
             case "inh_rand":
                 inh = np.argwhere(np.all(self.net.W < 0, axis=0)).flatten()
                 inh_cand = np.intersect1d(candidates, inh)
@@ -938,16 +1017,16 @@ class Simulation:
                             )
                         else:
                             r_max = np.array(
-                                [prob_dict["r_max"][i].value for i in range(maxs)]
+                                [prob_dict["r_max"][i].value for i in range(rmaxs)]
                             )
                             r_min = np.array(
                                 [
                                     prob_dict["r_min"][i].value
-                                    for i in range(net.do - maxs)
+                                    for i in range(net.N - rmaxs)
                                 ]
                             )
-                            r_op[rmax_idx, cols] = r_max
-                            r_op[rmin_idx, cols] = r_min
+                            r_op[np.ix_(rmax_idx, cols)] = r_max
+                            r_op[np.ix_(rmin_idx, cols)] = r_min
                     else:
                         r_op[:, cols] = np.nan
 
@@ -959,16 +1038,16 @@ class Simulation:
                             )
                         else:
                             r_max = np.array(
-                                [prob_dict["r_max"][i].value for i in range(maxs)]
+                                [prob_dict["r_max"][i].value for i in range(rmaxs)]
                             )
                             r_min = np.array(
                                 [
                                     prob_dict["r_min"][i].value
-                                    for i in range(net.do - maxs)
+                                    for i in range(net.N - rmaxs)
                                 ]
                             )
-                            r_op_lim[rmax_idx, cols] = r_max
-                            r_op_lim[rmin_idx, cols] = r_min
+                            r_op_lim[np.ix_(rmax_idx, cols)] = r_max
+                            r_op_lim[np.ix_(rmin_idx, cols)] = r_min
                     else:
                         r_op_lim[:, cols] = np.nan
 
@@ -981,6 +1060,7 @@ class Simulation:
         geometry: bool = True,
         centergeom: np.ndarray | None = None,
         rate_space: bool = True,
+        vol_space: bool = False,
         save: bool = True,
     ) -> tuple[matplotlib.figure.Figure, list, list]:
         """
@@ -996,6 +1076,9 @@ class Simulation:
 
         rate_space : bool, default=True
             If False, do not plot the rate space of the network.
+
+        vol_space : bool, default=False
+            If False, do not plot the voltage space of the network.
 
         save : bool, default=True
             If True, save the figure.
@@ -1016,69 +1099,115 @@ class Simulation:
 
         geometry = geometry and self.net.do in {2, 3}
         rate_space = rate_space and self.net.N in {2, 3}
+        vol_space = vol_space and self.net.N in {2, 3}
         assert centergeom is None or centergeom.shape == (
             self.net.do,
         ), "centergeom should be of shape (do,) or None"
 
-        if geometry and rate_space:
-            gs = gridspec.GridSpec(3, 3)
-            ax1 = plt.subplot(gs[0, 2])
-            ax2 = plt.subplot(gs[1, 2])
-            ax3 = plt.subplot(gs[2, 2])
-            ax4 = (
+        geom_plots = geometry + rate_space + vol_space
+        if geom_plots == 3:
+            gs = gridspec.GridSpec(4, 4)
+            ax1 = plt.subplot(gs[0, 3])
+            ax2 = plt.subplot(gs[1, 3])
+            ax3 = plt.subplot(gs[2, 3])
+            ax4 = plt.subplot(gs[3, 3])
+            ax5 = (
                 plt.subplot(gs[:, 0])
                 if self.net.do == 2
                 else plt.subplot(gs[:, 0], projection="3d")
             )
-            ax5 = (
+            ax6 = (
                 plt.subplot(gs[:, 1])
                 if self.net.N == 2
                 else plt.subplot(gs[:, 1], projection="3d")
             )
-            axes = [ax1, ax2, ax3, ax4, ax5]
-        elif geometry or rate_space:
-            gs = gridspec.GridSpec(3, 2)
-            ax1 = plt.subplot(gs[0, 1])
-            ax2 = plt.subplot(gs[1, 1])
-            ax3 = plt.subplot(gs[2, 1])
+            ax7 = (
+                plt.subplot(gs[:, 2])
+                if self.net.N == 2
+                else plt.subplot(gs[:, 2], projection="3d")
+            )
+            axes = [ax1, ax2, ax3, ax4, ax5, ax6, ax7]
+        elif geom_plots == 2:
+            gs = gridspec.GridSpec(4, 3)
+            ax1 = plt.subplot(gs[0, 2])
+            ax2 = plt.subplot(gs[1, 2])
+            ax3 = plt.subplot(gs[2, 2])
+            ax4 = plt.subplot(gs[3, 2])
             if geometry:
-                ax4 = (
+                ax5 = (
                     plt.subplot(gs[:, 0])
                     if self.net.do == 2
                     else plt.subplot(gs[:, 0], projection="3d")
                 )
             else:
-                ax4 = (
+                ax5 = (
                     plt.subplot(gs[:, 0])
                     if self.net.N == 2
                     else plt.subplot(gs[:, 0], projection="3d")
                 )
-            axes = [ax1, ax2, ax3, ax4]
+            ax6 = (
+                plt.subplot(gs[:, 1])
+                if self.net.N == 2
+                else plt.subplot(gs[:, 1], projection="3d")
+            )
+            axes = [ax1, ax2, ax3, ax4, ax5, ax6]
+        elif geom_plots == 1:
+            gs = gridspec.GridSpec(4, 2)
+            ax1 = plt.subplot(gs[0, 1])
+            ax2 = plt.subplot(gs[1, 1])
+            ax3 = plt.subplot(gs[2, 1])
+            ax4 = plt.subplot(gs[3, 1])
+            if geometry:
+                ax5 = (
+                    plt.subplot(gs[:, 0])
+                    if self.net.do == 2
+                    else plt.subplot(gs[:, 0], projection="3d")
+                )
+            else:
+                ax5 = (
+                    plt.subplot(gs[:, 0])
+                    if self.net.N == 2
+                    else plt.subplot(gs[:, 0], projection="3d")
+                )
+            axes = [ax1, ax2, ax3, ax4, ax5]
         else:
-            gs = gridspec.GridSpec(3, 1)
+            gs = gridspec.GridSpec(4, 1)
             ax1 = plt.subplot(gs[0, 0])
             ax2 = plt.subplot(gs[1, 0])
             ax3 = plt.subplot(gs[2, 0])
-            ax4 = None
-            axes = [ax1, ax2, ax3]
+            ax4 = plt.subplot(gs[3, 0])
+            ax5 = None
+            axes = [ax1, ax2, ax3, ax4]
 
         _, _, artists_io = self.plot_io(ax=ax1, t=self.Tmax, save=False)
         ax1.set_xlabel("")
         _, _, artists_spikes = self.plot_spikes(ax=ax2, t=self.Tmax, save=False)
         ax2.set_xlabel("")
         _, _, artists_rates = self.plot_rates(ax=ax3, t=self.Tmax, save=False)
-        artists = [artists_io, artists_spikes, artists_rates]
+        ax3.set_xlabel("")
+        _, _, artists_voltages = self.plot_voltages(ax=ax4, t=self.Tmax, save=False)
+        artists = [artists_io, artists_spikes, artists_rates, artists_voltages]
         if geometry:
             y_op = self.y_op[:, -1:] if hasattr(self, "y_op") else None
             y_op_lim = self.y_op_lim[:, -1:] if hasattr(self, "y_op_lim") else None
             _, _, artists_net = self.net.plot(
-                ax=ax4,
+                ax=ax5,
                 x=self.x,
                 y=self.y,
                 I=self.I,
                 y_op=y_op,
                 y_op_lim=y_op_lim,
                 centered=centergeom,
+                save=False,
+            )
+            artists.append(artists_net)
+        if vol_space:
+            _, _, artists_net = self.net.plot_vol_space(
+                x=self.x,
+                I=self.I,
+                ax=axes[-1] if not rate_space else axes[-2],
+                V=self.V,
+                voltage_biased=self.voltage_biased,
                 save=False,
             )
             artists.append(artists_net)
@@ -1376,12 +1505,98 @@ class Simulation:
 
         return fig, ax, artists
 
+    def plot_voltages(
+        self, ax: matplotlib.axes.Axes | None = None, t: float = -1, save: bool = True
+    ) -> tuple[
+        matplotlib.figure.Figure | matplotlib.figure.SubFigure,
+        matplotlib.axes.Axes,
+        list,
+    ]:
+        """
+        Plot the voltages of the network as a function of time.
+
+        Parameters
+        ----------
+        ax : matplotlib.axes.Axes, default=None
+            Axes to plot the voltages. If None, a new figure is created.
+
+        t : float, default=-1
+            Time to crop the voltages. If -1 the whole simulation is plotted.
+
+        save : bool, default=True
+            If True, save the figure.
+
+        Returns
+        -------
+        fig: matplotlib.figure.Figure or matplotlib.figure.SubFigure
+            Figure of the plot.
+
+        ax: matplotlib.axes.Axes
+            Axes of the plot.
+
+        artists: list
+            Artists of the plot.
+        """
+
+        alone = ax is None
+        if alone:
+            fig = plt.figure(figsize=(20, 10))
+            ax = fig.gca()
+
+        (V,) = self._crop(t, "voltages")
+
+        (x, y) = self._crop(t, "io")
+        (I,) = self._crop(t, "inp_curr")
+        effthresh = (
+            self.net.T[:, np.newaxis] - self.net.F @ x - I
+            if not self.voltage_biased
+            else self.net.T[:, np.newaxis] * np.ones_like(I)
+        )
+
+        artists = []
+        xaxis = np.linspace(0, V.shape[1] * self.dt, V.shape[1])
+        colors = _get_colors(self.net.N, self.net.W)
+
+        lineV = []
+        for i in range(self.net.N):
+            label = ""
+            if i < 10:
+                for j in np.arange(i, self.net.N, 10):
+                    label += f"V{j + 1},"
+            line = ax.plot(xaxis, V[i, :], color=colors[i], label=label)[0]
+            thresh = ax.plot(
+                xaxis,
+                effthresh[i, :],
+                color=colors[i],
+                linestyle="--",
+                alpha=0.5,
+            )[0]
+            lineV.append([line, thresh])
+        artists.append(lineV)
+
+        ax.set_ylabel("V(t)")
+        ax.set_xlabel("time (s)")
+        ax.set_xlim(-0.5, self.Tmax + 0.5)
+        ax.set_ylim(np.min(self.V) - 0.05, np.max(self.V) + 0.05)
+        ax.legend()
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+
+        fig = ax.get_figure()
+        assert fig is not None
+        if save:
+            assert type(fig) is matplotlib.figure.Figure
+            _save_fig(fig, self.time_stamp + "-" + self.tag + "-voltages-plot.png")
+
+        return fig, ax, artists
+
     # ANIMATION ####
 
     def animate(
         self,
         geometry: bool = True,
         rate_space: bool = True,
+        vol_space: bool = False,
     ) -> None:
         """
         Animate the results of a simulation.
@@ -1394,55 +1609,91 @@ class Simulation:
         rate_space : bool, default=True
             If False, do not plot the rate space of the network.
 
+        vol_space : bool, default=False
+            If False, do not plot the voltage space of the network.
+
         """
 
         fig = plt.figure(figsize=(20, 10))
 
         geometry = geometry and self.net.do in {2, 3}
         rate_space = rate_space and self.net.N in {2, 3}
+        vol_space = vol_space and self.net.N in {2, 3}
 
-        if geometry and rate_space:
-            gs = gridspec.GridSpec(3, 3)
-            ax1 = plt.subplot(gs[0, 2])
-            ax2 = plt.subplot(gs[1, 2])
-            ax3 = plt.subplot(gs[2, 2])
-            ax4 = (
+        geom_plots = geometry + rate_space + vol_space
+        if geom_plots == 3:
+            gs = gridspec.GridSpec(4, 4)
+            ax1 = plt.subplot(gs[0, 3])
+            ax2 = plt.subplot(gs[1, 3])
+            ax3 = plt.subplot(gs[2, 3])
+            ax4 = plt.subplot(gs[3, 3])
+            ax5 = (
                 plt.subplot(gs[:, 0])
                 if self.net.do == 2
                 else plt.subplot(gs[:, 0], projection="3d")
             )
-            ax5 = (
+            ax6 = (
                 plt.subplot(gs[:, 1])
                 if self.net.N == 2
                 else plt.subplot(gs[:, 1], projection="3d")
             )
-            axes = [ax1, ax2, ax3, ax4, ax5]
-        elif geometry or rate_space:
-            gs = gridspec.GridSpec(3, 2)
-            ax1 = plt.subplot(gs[0, 1])
-            ax2 = plt.subplot(gs[1, 1])
-            ax3 = plt.subplot(gs[2, 1])
+            ax7 = (
+                plt.subplot(gs[:, 2])
+                if self.net.N == 2
+                else plt.subplot(gs[:, 2], projection="3d")
+            )
+            axes = [ax1, ax2, ax3, ax4, ax5, ax6, ax7]
+        elif geom_plots == 2:
+            gs = gridspec.GridSpec(4, 3)
+            ax1 = plt.subplot(gs[0, 2])
+            ax2 = plt.subplot(gs[1, 2])
+            ax3 = plt.subplot(gs[2, 2])
+            ax4 = plt.subplot(gs[3, 2])
             if geometry:
-                ax4 = (
+                ax5 = (
                     plt.subplot(gs[:, 0])
                     if self.net.do == 2
                     else plt.subplot(gs[:, 0], projection="3d")
                 )
             else:
-                ax4 = (
+                ax5 = (
                     plt.subplot(gs[:, 0])
                     if self.net.N == 2
                     else plt.subplot(gs[:, 0], projection="3d")
                 )
-            ax5 = None
-            axes = [ax1, ax2, ax3, ax4]
+            ax6 = (
+                plt.subplot(gs[:, 1])
+                if self.net.N == 2
+                else plt.subplot(gs[:, 1], projection="3d")
+            )
+            axes = [ax1, ax2, ax3, ax4, ax5, ax6]
+        elif geom_plots == 1:
+            gs = gridspec.GridSpec(4, 2)
+            ax1 = plt.subplot(gs[0, 1])
+            ax2 = plt.subplot(gs[1, 1])
+            ax3 = plt.subplot(gs[2, 1])
+            ax4 = plt.subplot(gs[3, 1])
+            if geometry:
+                ax5 = (
+                    plt.subplot(gs[:, 0])
+                    if self.net.do == 2
+                    else plt.subplot(gs[:, 0], projection="3d")
+                )
+            else:
+                ax5 = (
+                    plt.subplot(gs[:, 0])
+                    if self.net.N == 2
+                    else plt.subplot(gs[:, 0], projection="3d")
+                )
+            axes = [ax1, ax2, ax3, ax4, ax5]
         else:
-            gs = gridspec.GridSpec(3, 1)
+            gs = gridspec.GridSpec(4, 1)
             ax1 = plt.subplot(gs[0, 0])
             ax2 = plt.subplot(gs[1, 0])
             ax3 = plt.subplot(gs[2, 0])
-            ax4 = None
-            axes = [ax1, ax2, ax3]
+            ax4 = plt.subplot(gs[3, 0])
+            ax5 = None
+            axes = [ax1, ax2, ax3, ax4]
 
         artists = []
         _, _, artists_io = self.plot_io(ax=ax1, t=0, save=False)
@@ -1450,9 +1701,12 @@ class Simulation:
         _, _, artists_spikes = self.plot_spikes(ax=ax2, t=0, save=False)
         ax2.set_xlabel("")
         _, _, artists_rates = self.plot_rates(ax=ax3, t=0, save=False)
-        artists = [artists_io, artists_spikes, artists_rates]
+        ax3.set_xlabel("")
+        _, _, artists_voltages = self.plot_voltages(ax=ax4, t=0, save=False)
+        artists = [artists_io, artists_spikes, artists_rates, artists_voltages]
 
-        x, y, I, r, y_op, y_op_lim, r_op, r_op_lim = (
+        x, y, I, r, V, y_op, y_op_lim, r_op, r_op_lim = (
+            None,
             None,
             None,
             None,
@@ -1462,23 +1716,46 @@ class Simulation:
             None,
             None,
         )
-        if geometry or rate_space:
+        if geometry or rate_space or vol_space:
             x, y = self._crop(t=0, type="io")
             (I,) = self._crop(t=0, type="inp_curr")
             (r,) = self._crop(t=0, type="rates")
+            (V,) = self._crop(t=0, type="voltages")
             y_op, y_op_lim, r_op, r_op_lim = self._crop(t=0, type="op")
         if geometry:
             y_op = self.y_op[:, :1] if hasattr(self, "y_op") else None
             y_op_lim = self.y_op_lim[:, :1] if hasattr(self, "y_op_lim") else None
             _, _, artists_net = self.net.plot(
-                ax=ax4, x=x, y=y, I=I, y_op=y_op, y_op_lim=y_op_lim, save=False
+                ax=ax5,
+                x=x,
+                y=y,
+                I=I,
+                y_op=y_op,
+                y_op_lim=y_op_lim,
+                save=False,
+            )
+            artists.append(artists_net)
+        if vol_space:
+            _, _, artists_net = self.net.plot_vol_space(
+                x=x,
+                I=I,
+                ax=axes[-1] if not rate_space else axes[-2],
+                V=V,
+                voltage_biased=self.voltage_biased,
+                save=False,
             )
             artists.append(artists_net)
         if rate_space:
             r_op = self.r_op[:, :1] if hasattr(self, "r_op") else None
             r_op_lim = self.r_op_lim[:, :1] if hasattr(self, "r_op_lim") else None
             _, _, artists_net = self.net.plot_rate_space(
-                x=x, I=I, ax=axes[-1], r=r, r_op=r_op, r_op_lim=r_op_lim, save=False
+                x=x,
+                I=I,
+                ax=axes[-1],
+                r=r,
+                r_op=r_op,
+                r_op_lim=r_op_lim,
+                save=False,
             )
             artists.append(artists_net)
 
@@ -1502,11 +1779,12 @@ class Simulation:
             self._animate_io(artists=artists[0], t=t)
             self._animate_spikes(artists=artists[1], t=t)
             self._animate_rates(artists=artists[2], t=t)
+            self._animate_voltages(artists=artists[3], t=t)
 
             if geometry or rate_space:
-                x, y = self._crop(t, "io")
-                (I,) = self._crop(t, "inp_curr")
+
                 (r,) = self._crop(t, "rates")
+                (V,) = self._crop(t, "voltages")
 
                 newspiked = _neurons_spiked_between(self.stimes, tpast, t)
                 oldspiked = _neurons_spiked_between(self.stimes, tpastpast, tpast)
@@ -1517,6 +1795,7 @@ class Simulation:
                     ]
                 )
 
+                x, y = self._crop(t, "io")
                 input_change = (
                     not np.array_equal(
                         x[:, int(t / self.dt)], x[:, int(tpast / self.dt)]
@@ -1524,6 +1803,8 @@ class Simulation:
                     if tpast >= 0
                     else False
                 )
+
+                (I,) = self._crop(t, "inp_curr")
                 current_change = (
                     not np.array_equal(
                         I[:, int(t / self.dt)], I[:, int(tpast / self.dt)]
@@ -1532,12 +1813,12 @@ class Simulation:
                     else False
                 )
 
-                assert ax4 is not None
+                assert ax5 is not None
                 if geometry:
                     y_op, y_op_lim, _, _ = self._crop(t, "op")
                     self.net._animate(
-                        ax=ax4,
-                        artists=artists[3],
+                        ax=ax5,
+                        artists=artists[4],
                         x=x,
                         I=I,
                         y=y,
@@ -1546,6 +1827,18 @@ class Simulation:
                         input_change=input_change,
                         current_change=current_change,
                         spiking=spiking,
+                    )
+                if vol_space:
+                    self.net._animate_vol_space(
+                        ax=axes[-1] if not rate_space else axes[-2],
+                        artists=artists[-1] if not rate_space else artists[-2],
+                        x=x,
+                        I=I,
+                        V=V,
+                        input_change=input_change,
+                        current_change=current_change,
+                        spiking=spiking,
+                        voltage_biased=self.voltage_biased,
                     )
                 if rate_space:
                     _, _, r_op, r_op_lim = self._crop(t, "op")
@@ -1671,6 +1964,41 @@ class Simulation:
                 artists[k][i].set_xdata(xaxis)
                 artists[k][i].set_ydata(r_op_lim[i, :])
 
+    def _animate_voltages(
+        self,
+        artists: list,
+        t: float,
+    ) -> None:
+        """
+        Animate the voltages of the network as a function of time.
+        Modifies the artists for the frame at time t
+
+        Parameters
+        ----------
+        artists : list
+            Artists of the plot.
+
+        t : float
+            Time to crop the voltages. For the frames of the animation.
+
+        """
+
+        (V,) = self._crop(t, "voltages")
+        x, _ = self._crop(t, "io")
+        (I,) = self._crop(t, "inp_curr")
+        effthresh = (
+            self.net.T[:, np.newaxis] - self.net.F @ x - I
+            if not self.voltage_biased
+            else self.net.T[:, np.newaxis] * np.ones_like(I)
+        )
+
+        xaxis = np.linspace(0, V.shape[1] * self.dt, V.shape[1])
+        for i in range(self.net.N):
+            artists[0][i][0].set_xdata(xaxis)
+            artists[0][i][0].set_ydata(V[i, :])
+            artists[0][i][1].set_xdata(xaxis)
+            artists[0][i][1].set_ydata(effthresh[i, :])
+
     def _crop(self, t: float = -1, type: str = "io") -> tuple[np.ndarray, ...]:
         """
         Crop the results of the simulation to time t. For animation purposes.
@@ -1710,6 +2038,9 @@ class Simulation:
             case "rates":
                 r = self.r[:, : time_step + 1]
                 return (r,)
+            case "voltages":
+                V = self.V[:, : time_step + 1]
+                return (V,)
             case "op":
                 y_op = self.y_op[:, : time_step + 1] if hasattr(self, "y_op") else None
                 y_op_lim = (
@@ -1725,4 +2056,6 @@ class Simulation:
                 )
                 return y_op, y_op_lim, r_op, r_op_lim  # type:ignore
             case _:
-                raise ValueError("type should be 'io', 'stimes' or 'rates'")
+                raise ValueError(
+                    "type should be 'io', 'inp_curr', 'stimes', 'op', 'voltages' or 'rates'"
+                )

@@ -174,6 +174,8 @@ def _canon_symmetric(Q: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     # assert symmetric
     assert np.allclose(Q, Q.T), "Q should be symmetric"
     eigval, eigvec = np.linalg.eigh(Q)
+    eigval = eigval[::-1]
+    eigvec = eigvec[:, ::-1]
     S = np.diag(np.sign(eigval))
     A = np.diag(np.sqrt(np.abs(eigval))) @ eigvec.T
     return A, S

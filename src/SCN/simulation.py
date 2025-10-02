@@ -745,9 +745,10 @@ class Simulation:
 
         signs = np.diag(S)
         maxs = np.sum(signs == -1)
+        mins = np.sum(signs == 1)
 
-        rmax_idx = np.where(EAL[:, maxs:] == 0)[0]
-        rmin_idx = np.where(EAL[:, maxs:] != 0)[0]
+        rmax_idx = np.where(EAL[:, :mins] == 0)[0]
+        rmin_idx = np.where(EAL[:, :mins] != 0)[0]
         rmaxs = rmax_idx.shape[0]
         rmins = rmin_idx.shape[0]
 
@@ -765,8 +766,8 @@ class Simulation:
                 for i in range(net.N):
                     prob.Equation(
                         net.F[i, :] @ xp
-                        + EAL[i, :maxs] @ z_max
-                        + EAL[i, maxs:] @ z_min
+                        + EAL[i, mins:] @ z_max
+                        + EAL[i, :mins] @ z_min
                         - C[i]
                         <= 0
                     )
@@ -775,18 +776,18 @@ class Simulation:
                         lamb[i]
                         * (
                             net.F[i, :] @ xp
-                            + EAL[i, :maxs] @ z_max
-                            + EAL[i, maxs:] @ z_min
+                            + EAL[i, mins:] @ z_max
+                            + EAL[i, :mins] @ z_min
                             - C[i]
                         )
                         == 0
                     )
-                for i in range(net.do - maxs):
-                    prob.Equation(z_min[i] == -lamb @ EAL[:, maxs + i])
+                for i in range(mins):
+                    prob.Equation(z_min[i] == -lamb @ EAL[:, i])
 
                 prob.Obj(
                     sum([z_max[i] ** 2 for i in range(maxs)])
-                    - sum([z_min[i] ** 2 for i in range(net.do - maxs)])
+                    - sum([z_min[i] ** 2 for i in range(mins)])
                 )
                 return {"input": xp, "z_max": z_max, "z_min": z_min, "prob": prob}
 
@@ -938,11 +939,11 @@ class Simulation:
                             net.E, C_op + net.F @ x_values[:, j] - 1e-2, rcond=None
                         )[0]
                     z_init = A @ y_init
-                    z_max_init = z_init[:maxs]
-                    z_min_init = z_init[maxs:]
+                    z_max_init = z_init[mins:]
+                    z_min_init = z_init[:mins]
                     for i in range(maxs):
                         prob_dict["z_max"][i].value = z_max_init[i]
-                    for i in range(net.do - maxs):
+                    for i in range(mins):
                         prob_dict["z_min"][i].value = z_min_init[i]
 
                 if prob_dict["name"] in {"prob_r_op", "prob_r_op_lim"}:
@@ -991,9 +992,9 @@ class Simulation:
                             [prob_dict["z_max"][i].value for i in range(maxs)]
                         )
                         z_min = np.array(
-                            [prob_dict["z_min"][i].value for i in range(net.do - maxs)]
+                            [prob_dict["z_min"][i].value for i in range(mins)]
                         )
-                        y_op_val = np.linalg.pinv(A) @ np.vstack((z_max, z_min))
+                        y_op_val = np.linalg.pinv(A) @ np.vstack((z_min, z_max))
                         y_op[:, cols] = y_op_val
                     else:
                         y_op[:, cols] = np.nan
@@ -1005,7 +1006,7 @@ class Simulation:
                         z_min = np.array(
                             [prob_dict["z_min"][i].value for i in range(net.do - maxs)]
                         )
-                        y_op_lim_val = np.linalg.pinv(A) @ np.vstack((z_max, z_min))
+                        y_op_lim_val = np.linalg.pinv(A) @ np.vstack((z_min, z_max))
                         y_op_lim[:, cols] = y_op_lim_val
                     else:
                         y_op_lim[:, cols] = np.nan

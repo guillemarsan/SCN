@@ -180,7 +180,7 @@ class Low_rank_LIF:
         A, S = _canon_symmetric(Q)
         negdef = -1 if np.all(np.diag(S) < 0) else 1
         EAinv = E @ np.linalg.inv(A)
-        Coup = np.diag(1 - 2 * np.all(EAinv[:, np.diag(S) == 1] == 0, axis=1))
+        Coup = np.diag(1 - 2 * np.all(np.isclose(EAinv[:, np.diag(S) == 1], 0), axis=1))
 
         D = spike_scale * -negdef * np.linalg.inv(Q) @ E.T @ Coup
 
@@ -441,7 +441,7 @@ class Low_rank_LIF:
         I: np.ndarray | None = None,
         ax: matplotlib.axes.Axes | None = None,
         V: np.ndarray | None = None,
-        voltage_biased: bool = False,
+        voltage_bias: str = "",
         save: bool = True,
     ) -> tuple[
         matplotlib.figure.Figure | matplotlib.figure.SubFigure,
@@ -468,8 +468,11 @@ class Low_rank_LIF:
         V : ndarray of shape (N, time_steps), default=None
             Voltages trajectory to plot.
 
-        voltage_biased : bool, default=False
-            If True, the thresholds do not change with Fx + I but the voltage is biased.
+        voltage_bias : str, default=""
+            If "", the thresholds change with Fx + I.
+            If "F", the thresholds change with I only.
+            If "I", the thresholds change with Fx only.
+            If "FI", the thresholds do not change with Fx + I but the voltage is biased.
 
         save : bool, default=True
             If True, the figure is saved.
@@ -485,6 +488,13 @@ class Low_rank_LIF:
         artists : list
             List of artists in the plot.
         """
+
+        assert voltage_bias in {
+            "",
+            "F",
+            "I",
+            "FI",
+        }, 'voltage_bias should be in {"", "F", "I", "FI"}'
 
         if ax is None:
             ax = plt.figure(figsize=(10, 10)).gca()
@@ -508,10 +518,22 @@ class Low_rank_LIF:
 
         # plot the network
         if self.N in {2, 3}:
+            match voltage_bias:
+                case "":
+                    Tv = self.T - self.F @ x0 - I0
+                case "F":
+                    Tv = self.T - I0
+                case "I":
+                    Tv = self.T - self.F @ x0
+                case "FI":
+                    Tv = self.T
+                case _:
+                    raise ValueError('voltage_bias should be in {"", "F", "I", "FI"}')
+
             artists = (
-                self._draw_vol_space_2D(x0, I0, ax, voltage_biased)
+                self._draw_vol_space_2D(Tv, ax)
                 if self.N == 2
-                else self._draw_vol_space_3D(x0, I0, ax, voltage_biased)
+                else self._draw_vol_space_3D(Tv, ax)
             )
             # V Trajectory
             if V is not None:
@@ -590,8 +612,7 @@ class Low_rank_LIF:
 
         plot._animate_traj(ax, artists[-2 - offset], y)
         plot._animate_small_vector(artists[-1 - offset], y[:, -1], -y[:, -1])
-        if spiking is not None and len(spiking) > 0:
-            plot._animate_spiking(artists, spiking)
+
         if input_change or current_change:
             x0 = x[:, -1]
             I0 = I[:, -1]
@@ -608,6 +629,9 @@ class Low_rank_LIF:
                 plot._animate_scatter(artists[-offset], y_op[:, -1:])
             if y_op_lim is not None:
                 plot._animate_scatter(artists[-1], y_op_lim[:, -1:])
+
+        if spiking is not None and len(spiking) > 0:
+            plot._animate_spiking(artists, spiking)
 
     def _animate_rate_space(
         self,
@@ -666,8 +690,7 @@ class Low_rank_LIF:
 
         plot._animate_traj(ax, artists[-2 - offset], r)
         plot._animate_small_vector(artists[-1 - offset], r[:, -1], -r[:, -1])
-        if spiking is not None and len(spiking) > 0:
-            plot._animate_spiking(artists, spiking)
+
         if input_change or current_change:
             x0 = x[:, -1]
             I0 = I[:, -1]
@@ -681,6 +704,9 @@ class Low_rank_LIF:
             if r_op_lim is not None:
                 plot._animate_scatter(artists[-1], r_op_lim[:, -1:])
 
+        if spiking is not None and len(spiking) > 0:
+            plot._animate_spiking(artists, spiking)
+
     def _animate_vol_space(
         self,
         ax: matplotlib.axes.Axes,
@@ -691,7 +717,7 @@ class Low_rank_LIF:
         input_change: bool = False,
         current_change: bool = False,
         spiking: np.ndarray | None = None,
-        voltage_biased: bool = False,
+        voltage_bias: str = "",
     ) -> None:
         """
         Animate the voltage space by modifying the artists.
@@ -722,24 +748,39 @@ class Low_rank_LIF:
         spiking : ndarray(int), default=None
             Neurons spiking in this frame. Index starting at 1. -n if the neuron needs to be restored.
 
-        voltage_biased : bool, default=False
-            If True, the thresholds do not change with Fx + I but the voltage is biased.
+        voltage_bias : str, default=""
+            If "", the thresholds change with Fx + I.
+            If "F", the thresholds change with I only.
+            If "I", the thresholds change with Fx only.
+            If "FI", the thresholds do not change with Fx + I but the voltage is biased.
         """
 
         offset = 0
 
         plot._animate_traj(ax, artists[-2 - offset], V)
         plot._animate_small_vector(artists[-1 - offset], V[:, -1], -V[:, -1])
-        if spiking is not None and len(spiking) > 0:
-            plot._animate_spiking(artists, spiking)
-        if input_change or current_change:
+
+        if (input_change or current_change) and voltage_bias != "FI":
             x0 = x[:, -1]
             I0 = I[:, -1]
+            match voltage_bias:
+                case "":
+                    Tv = self.T - self.F @ x0 - I0
+                case "F":
+                    Tv = self.T - I0
+                case "I":
+                    Tv = self.T - self.F @ x0
+                case _:
+                    raise ValueError('voltage_biased should be in {"", "F", "I", "FI"}')
+
             (
-                self._draw_vol_space_2D(x0, I0, ax, voltage_biased, artists)
+                self._draw_vol_space_2D(Tv, ax, artists)
                 if self.N == 2
-                else self._draw_vol_space_3D(x0, I0, ax, voltage_biased, artists)
+                else self._draw_vol_space_3D(Tv, ax, artists)
             )
+
+        if spiking is not None and len(spiking) > 0:
+            plot._animate_spiking(artists, spiking)
 
     def _draw_bbox_2D(
         self,
@@ -1320,10 +1361,8 @@ class Low_rank_LIF:
 
     def _draw_vol_space_2D(
         self,
-        x0: np.ndarray,
-        I0: np.ndarray,
+        Tv: np.ndarray,
         ax: matplotlib.axes.Axes,
-        voltage_biased: bool = False,
         artists: list | None = None,
     ) -> list:
         """
@@ -1332,17 +1371,11 @@ class Low_rank_LIF:
         Parameters
         ----------
 
-        x0 : ndarray of shape (di,)
-            Input of the network.
-
-        I0 : ndarray of shape (N,)
-            Input currents of the neurons.
+        Tv : ndarray of shape (2,)
+            Effective thresholds of the neurons after biasing.
 
         ax : matplotlib.axes.Axes
             Axes to plot the network.
-
-        voltage_biased : bool, default=False
-            If True, the thresholds do not change with Fx + I but the voltage is biased.
 
         artists : list, default = None
             List of artists to update the plot. If None, new artists are created.
@@ -1360,7 +1393,7 @@ class Low_rank_LIF:
 
         colors = _get_colors(self.N, self.W)
 
-        corner = self.T - self.F @ x0 - I0 if not voltage_biased else self.T
+        corner = Tv
         rext = corner[0] + 0.25
         lext = corner[0] - 1.75
         uext = corner[1] + 0.25
@@ -1432,10 +1465,8 @@ class Low_rank_LIF:
 
     def _draw_vol_space_3D(
         self,
-        x0: np.ndarray,
-        I0: np.ndarray,
+        Tv: np.ndarray,
         ax: matplotlib.axes.Axes,
-        voltage_biased: bool = False,
         artists: list | None = None,
     ) -> list:
         """
@@ -1444,17 +1475,11 @@ class Low_rank_LIF:
         Parameters
         ----------
 
-        x0 : ndarray of shape (di,)
-            Input of the network.
-
-        I0 : ndarray of shape (N,)
-            Input currents of the neurons.
+        Tv : ndarray of shape (3,)
+            Effective thresholds of the neurons after biasing.
 
         ax : matplotlib.axes.Axes
             Axes to plot the network.
-
-        voltage_biased : bool, default=False
-            If True, the thresholds do not change with Fx + I but the voltage is biased.
 
         artists : list, default = None
             List of artists to update the plot. If None, new artists are created.
@@ -1474,7 +1499,7 @@ class Low_rank_LIF:
 
         colors = _get_colors(self.N, self.W)
 
-        corner = self.T - self.F @ x0 - I0 if not voltage_biased else self.T
+        corner = Tv
         rext = corner[0]
         lext = corner[0] - 1.75
         uext = corner[1]

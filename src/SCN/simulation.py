@@ -107,7 +107,7 @@ class Simulation:
         I: float | np.ndarray = 0.0,
         draw_break: str = "no",
         criterion: str = "max",
-        voltage_biased: bool = False,
+        voltage_bias: str = "",
         dt: float = 0.001,
         Tmax: float = 10,
         c: np.ndarray | None = None,
@@ -150,9 +150,11 @@ class Simulation:
             - 'inh_max': neuron with the highest voltage spikes (all inhibitory priority)
             - 'inh_rand': neuron is chosen randomly (all inhibitory priority)
 
-        voltage_biased : bool, default=False
-            If True, the voltage is biased by Fc(t) + I(t).
-            If False, the threshold is biased by -Fx(t) - I(t).
+        voltage_bias : str, default=""
+            If "", the voltage is not biased.
+            If "F", the voltage is biased by V(t) = Ey(t) + Fx(t).
+            If "I", the voltage is biased by V(t) = Ey(t) + I.
+            If "FI", the voltage is biased by V(t) = Ey(t) + Fx(t) + I.
 
         dt : float, default=0.001
             Time step of the simulation (s).
@@ -183,6 +185,13 @@ class Simulation:
 
         time_steps = int(Tmax / dt)
 
+        assert voltage_bias in {
+            "",
+            "F",
+            "I",
+            "FI",
+        }, "voltage_bias should be '', 'F', 'I' or 'FI'"
+
         if x is not None and c is not None:
             raise Warning("Both x and c provided, c will be used")
         elif x is not None:
@@ -199,14 +208,28 @@ class Simulation:
                 else:
                     raise ValueError("x should have either di or time_steps elements")
 
+        assert (
+            type(I) is float or type(I) is np.ndarray
+        ), "I should be a float or a ndarray"
         if type(I) is float:
             I = I * np.ones((net.N, time_steps))
-        else:
-            assert type(I) is np.ndarray, "I should be a float or a ndarray"
-            assert I.shape[0] == net.N, "I first dimension should be equal to N"
-            assert (
-                I.shape[1] == time_steps
-            ), "I second dim. should be equal to time_steps"
+        elif type(I) is np.ndarray:
+            if I.ndim == 1:
+                if I.shape[0] == net.N:
+                    I = np.tile(I[:, np.newaxis], (1, time_steps))
+                elif I.shape[0] == time_steps:
+                    I = np.tile(I, (net.N, 1))
+                else:
+                    raise ValueError("I should have either N or time_steps elements")
+            else:
+                assert I.shape[0] == net.N, "I first dimension should be equal to N"
+                assert (
+                    I.shape[1] == time_steps
+                ), "I second dim. should be equal to time_steps"
+            assert not (
+                voltage_bias in {"I", "FI"} and not np.all(I == I[:, [0]])
+            ), "To bias the voltage with I, I should be constant in time"
+        assert type(I) is np.ndarray
 
         if c is not None:
             assert c.shape[0] == net.di, "c first dimension should be equal to di"
@@ -218,7 +241,7 @@ class Simulation:
         self.I = I
         self.draw_break = draw_break
         self.criterion = criterion
-        self.voltage_biased = voltage_biased
+        self.voltage_bias = voltage_bias
         self.dt = dt
         self.Tmax = Tmax
 
@@ -235,24 +258,16 @@ class Simulation:
                 raise Warning("y0 was given and prioritized over r0 and V0")
             r0, res = nnls(self.net.D, y0)
             assert r0 is not None and res < 1e-6, "failed to compute r0 with nnls"
-            V0 = (
-                self.net.E @ y0 + self.net.F @ x[:, 0] + I[:, 0]
-                if voltage_biased
-                else self.net.E @ y0
-            )
+            V0 = self.net.E @ y0
         elif r0 is not None:
             if V0 is not None:
                 raise Warning("r0 was given and prioritized over V0")
             y0 = self.net.D @ r0
-            V0 = (
-                self.net.F @ x[:, 0] + self.net.E @ y0 + I[:, 0]
-                if voltage_biased
-                else self.net.E @ y0
-            )
+            V0 = self.net.E @ y0
         elif V0 is not None:
             y0 = np.linalg.lstsq(
                 self.net.E,
-                (V0 - self.net.F @ x[:, 0] - I[:, 0]) if voltage_biased else V0,
+                V0,
                 rcond=None,
             )[0]
             r0 = np.linalg.lstsq(self.net.D, y0, rcond=None)[0]
@@ -261,20 +276,12 @@ class Simulation:
                 y0 = x[:, 0]
                 r0 = nnls(self.net.D, y0)[0]
                 assert r0 is not None, "failed to compute r0 with nnls"
-                V0 = (
-                    self.net.F @ x[:, 0] + self.net.E @ y0 + I[:, 0]
-                    if voltage_biased
-                    else self.net.E @ y0
-                )
+                V0 = self.net.E @ y0
             else:
                 # TODO Start within the subthreshold area
                 y0 = np.zeros(self.net.do)
                 r0 = np.zeros(self.net.N)
-                V0 = (
-                    self.net.F @ x[:, 0] + self.net.E @ y0 + I[:, 0]
-                    if voltage_biased
-                    else self.net.E @ y0
-                )
+                V0 = self.net.E @ y0
 
         self.y0 = y0
         self.r0 = r0
@@ -295,6 +302,18 @@ class Simulation:
         self.r = r
         self.s = s
         self.stimes = _stimes_from_s(s, dt)
+        match self.voltage_bias:
+            case "":
+                self.Tv = self.net.T[:, np.newaxis] - self.net.F @ self.x - self.I
+            case "F":
+                V = V + self.net.F @ x
+                self.Tv = self.net.T[:, np.newaxis] - self.I
+            case "I":
+                V = V + I
+                self.Tv = self.net.T[:, np.newaxis] - self.net.F @ self.x
+            case "FI":
+                V = V + self.net.F @ x + I
+                self.Tv = self.net.T[:, np.newaxis] * np.ones_like(self.I)
         self.V = V
         self.time_stamp = time.strftime("%Y%m%d-%H%M%S")
         self.tag = (
@@ -333,33 +352,16 @@ class Simulation:
         V[:, 0] = self.V0
         r[:, 0] = self.r0
 
-        if self.voltage_biased:
-            for t in range(time_steps - 1):
-                s[:, t][np.where(V[:, t] > self.net.T)] = 1
-                V[:, t + 1] = (
-                    V[:, t]
-                    + self.dt
-                    * (
-                        -self.net.lamb * V[:, t]
-                        + self.net.F @ self.c[:, t]
-                        + self.I[:, t]
-                    )
-                    + self.net.W @ s[:, t]
+        for t in range(time_steps - 1):
+            s[:, t][
+                np.where(
+                    V[:, t] > self.net.T - self.net.F @ self.x[:, t] - self.I[:, t]
                 )
-                r[:, t + 1] = r[:, t] + self.dt * (-self.net.lamb * r[:, t]) + s[:, t]
-        else:
-            for t in range(time_steps - 1):
-                s[:, t][
-                    np.where(
-                        V[:, t] > self.net.T - self.net.F @ self.x[:, t] - self.I[:, t]
-                    )
-                ] = 1
-                V[:, t + 1] = (
-                    V[:, t]
-                    + self.dt * (-self.net.lamb * V[:, t])
-                    + self.net.W @ s[:, t]
-                )
-                r[:, t + 1] = r[:, t] + self.dt * (-self.net.lamb * r[:, t]) + s[:, t]
+            ] = 1
+            V[:, t + 1] = (
+                V[:, t] + self.dt * (-self.net.lamb * V[:, t]) + self.net.W @ s[:, t]
+            )
+            r[:, t + 1] = r[:, t] + self.dt * (-self.net.lamb * r[:, t]) + s[:, t]
 
         y = self.net.D @ r
         return y, r, s, V
@@ -394,31 +396,17 @@ class Simulation:
         V[:, 0] = self.V0
         r[:, 0] = self.r0
 
-        if self.voltage_biased:
-            for t in range(time_steps - 1):
-                candidates = np.where(V[:, t] > self.net.T)[0]
-                while len(candidates) > 0:
-                    idx = self._idx_choose(V[:, t], self.net.T, candidates)
-                    s[idx, t] = 1
-                    V[:, t] = V[:, t] + self.net.W[:, idx]
-                    candidates = np.where(V[:, t] > self.net.T)[0]
-
-                V[:, t + 1] = V[:, t] + self.dt * (
-                    -self.net.lamb * V[:, t] + self.net.F @ self.c[:, t] + self.I[:, t]
-                )
-                r[:, t + 1] = r[:, t] + self.dt * (-self.net.lamb * r[:, t]) + s[:, t]
-        else:
-            for t in range(time_steps - 1):
-                effthresh = self.net.T - self.net.F @ self.x[:, t] - self.I[:, t]
+        for t in range(time_steps - 1):
+            effthresh = self.net.T - self.net.F @ self.x[:, t] - self.I[:, t]
+            candidates = np.where(V[:, t] > effthresh)[0]
+            while len(candidates) > 0:
+                idx = self._idx_choose(V[:, t], effthresh, candidates)
+                s[idx, t] = 1
+                V[:, t] = V[:, t] + self.net.W[:, idx]
                 candidates = np.where(V[:, t] > effthresh)[0]
-                while len(candidates) > 0:
-                    idx = self._idx_choose(V[:, t], effthresh, candidates)
-                    s[idx, t] = 1
-                    V[:, t] = V[:, t] + self.net.W[:, idx]
-                    candidates = np.where(V[:, t] > effthresh)[0]
 
-                V[:, t + 1] = V[:, t] + self.dt * (-self.net.lamb * V[:, t])
-                r[:, t + 1] = r[:, t] + self.dt * (-self.net.lamb * r[:, t]) + s[:, t]
+            V[:, t + 1] = V[:, t] + self.dt * (-self.net.lamb * V[:, t])
+            r[:, t + 1] = r[:, t] + self.dt * (-self.net.lamb * r[:, t]) + s[:, t]
 
         y = self.net.D @ r
         return y, r, s, V
@@ -453,38 +441,17 @@ class Simulation:
         V[:, 0] = self.V0
         r[:, 0] = self.r0
 
-        if self.voltage_biased:
-            for t in range(time_steps - 1):
-                candidates = np.where(V[:, t] > self.net.T)[0]
-                if len(candidates) > 0:
-                    idx = self._idx_choose(V[:, t], candidates, self.net.T)
-                    s[idx, t] = 1
+        for t in range(time_steps - 1):
+            effthresh = self.net.T - self.net.F @ self.x[:, t] - self.I[:, t]
+            candidates = np.where(V[:, t] > effthresh)[0]
+            if len(candidates) > 0:
+                idx = self._idx_choose(V[:, t], effthresh, candidates)
+                s[idx, t] = 1
 
-                V[:, t + 1] = (
-                    V[:, t]
-                    + self.dt
-                    * (
-                        -self.net.lamb * V[:, t]
-                        + self.net.F @ self.c[:, t]
-                        + self.I[:, t]
-                    )
-                    + self.net.W @ s[:, t]
-                )
-                r[:, t + 1] = r[:, t] + self.dt * (-self.net.lamb * r[:, t]) + s[:, t]
-        else:
-            for t in range(time_steps - 1):
-                effthresh = self.net.T - self.net.F @ self.x[:, t] - self.I[:, t]
-                candidates = np.where(V[:, t] > effthresh)[0]
-                if len(candidates) > 0:
-                    idx = self._idx_choose(V[:, t], effthresh, candidates)
-                    s[idx, t] = 1
-
-                V[:, t + 1] = (
-                    V[:, t]
-                    + self.dt * (-self.net.lamb * V[:, t])
-                    + self.net.W @ s[:, t]
-                )
-                r[:, t + 1] = r[:, t] + self.dt * (-self.net.lamb * r[:, t]) + s[:, t]
+            V[:, t + 1] = (
+                V[:, t] + self.dt * (-self.net.lamb * V[:, t]) + self.net.W @ s[:, t]
+            )
+            r[:, t + 1] = r[:, t] + self.dt * (-self.net.lamb * r[:, t]) + s[:, t]
 
         y = self.net.D @ r
         return y, r, s, V
@@ -1208,7 +1175,7 @@ class Simulation:
                 I=self.I,
                 ax=axes[-1] if not rate_space else axes[-2],
                 V=self.V,
-                voltage_biased=self.voltage_biased,
+                voltage_bias=self.voltage_bias,
                 save=False,
             )
             artists.append(artists_net)
@@ -1546,13 +1513,7 @@ class Simulation:
 
         (V,) = self._crop(t, "voltages")
 
-        (x, y) = self._crop(t, "io")
-        (I,) = self._crop(t, "inp_curr")
-        effthresh = (
-            self.net.T[:, np.newaxis] - self.net.F @ x - I
-            if not self.voltage_biased
-            else self.net.T[:, np.newaxis] * np.ones_like(I)
-        )
+        (Tv,) = self._crop(t, "voltage_thresh")
 
         artists = []
         xaxis = np.linspace(0, V.shape[1] * self.dt, V.shape[1])
@@ -1567,7 +1528,7 @@ class Simulation:
             line = ax.plot(xaxis, V[i, :], color=colors[i], label=label)[0]
             thresh = ax.plot(
                 xaxis,
-                effthresh[i, :],
+                Tv[i, :],
                 color=colors[i],
                 linestyle="--",
                 alpha=0.5,
@@ -1742,7 +1703,7 @@ class Simulation:
                 I=I,
                 ax=axes[-1] if not rate_space else axes[-2],
                 V=V,
-                voltage_biased=self.voltage_biased,
+                voltage_bias=self.voltage_bias,
                 save=False,
             )
             artists.append(artists_net)
@@ -1839,7 +1800,7 @@ class Simulation:
                         input_change=input_change,
                         current_change=current_change,
                         spiking=spiking,
-                        voltage_biased=self.voltage_biased,
+                        voltage_bias=self.voltage_bias,
                     )
                 if rate_space:
                     _, _, r_op, r_op_lim = self._crop(t, "op")
@@ -1985,20 +1946,14 @@ class Simulation:
         """
 
         (V,) = self._crop(t, "voltages")
-        x, _ = self._crop(t, "io")
-        (I,) = self._crop(t, "inp_curr")
-        effthresh = (
-            self.net.T[:, np.newaxis] - self.net.F @ x - I
-            if not self.voltage_biased
-            else self.net.T[:, np.newaxis] * np.ones_like(I)
-        )
+        (Tv,) = self._crop(t, "voltage_thresh")
 
         xaxis = np.linspace(0, V.shape[1] * self.dt, V.shape[1])
         for i in range(self.net.N):
             artists[0][i][0].set_xdata(xaxis)
             artists[0][i][0].set_ydata(V[i, :])
             artists[0][i][1].set_xdata(xaxis)
-            artists[0][i][1].set_ydata(effthresh[i, :])
+            artists[0][i][1].set_ydata(Tv[i, :])
 
     def _crop(self, t: float = -1, type: str = "io") -> tuple[np.ndarray, ...]:
         """
@@ -2010,13 +1965,14 @@ class Simulation:
             Time to crop the results. If -1 the whole simulation is returned.
 
         type : str, default='io'
-            Type of results to crop: 'io' (x,y), 'inp_curr' (I), 'stimes' (stimes) or 'rates' (r).
+            Type of results to crop: 'io' (x,y), 'inp_curr' (I), 'stimes' (stimes), 'voltage_thresh' (Tv) or 'rates' (r).
 
         Returns
         -------
         x, y : np.ndarray of (di, t/dt), np.ndarray (do, t/dt)
         I: np.ndarray of (N, t/dt)
         stimes: np.ndarray of (#spikes at time < t, 2)
+        Tv: np.ndarray of (N, t/dt)
         rates: np.ndarray (N, t/dt)
             Cropped results.
         """
@@ -2042,6 +1998,9 @@ class Simulation:
             case "voltages":
                 V = self.V[:, : time_step + 1]
                 return (V,)
+            case "voltage_thresh":
+                Tv = self.Tv[:, : time_step + 1]
+                return (Tv,)
             case "op":
                 y_op = self.y_op[:, : time_step + 1] if hasattr(self, "y_op") else None
                 y_op_lim = (

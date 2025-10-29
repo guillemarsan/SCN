@@ -30,6 +30,8 @@ extensions = [
     "sphinx_design",
 ]
 
+autosummary_generate = True
+
 autodoc_default_options = {
     "member-order": "bysource",
 }

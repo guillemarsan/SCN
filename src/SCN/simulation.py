@@ -108,6 +108,7 @@ class Simulation:
         draw_break: str = "no",
         criterion: str = "max",
         voltage_bias: str = "",
+        latent_bias: bool = False,
         dt: float = 0.001,
         Tmax: float = 10,
         c: np.ndarray | None = None,
@@ -155,6 +156,10 @@ class Simulation:
             If "F", the voltage is biased by V(t) = Ey(t) + Fx(t).
             If "I", the voltage is biased by V(t) = Ey(t) + I.
             If "FI", the voltage is biased by V(t) = Ey(t) + Fx(t) + I.
+
+        latent_bias : bool, default=False
+            If False, the latent space is not biased.
+            If True, the latent space is biased by y(t) = D r(t) + b with b such that E b = I.
 
         dt : float, default=0.001
             Time step of the simulation (s).
@@ -231,6 +236,20 @@ class Simulation:
             ), "To bias the voltage with I, I should be constant in time"
         assert type(I) is np.ndarray
 
+        bias = np.zeros((net.do,))
+        if latent_bias:
+            assert np.all(
+                I == I[:, [0]]
+            ), "To bias the latent space, I should be constant in time"
+            bias, res, *_ = np.linalg.lstsq(net.E, I[:, 0], rcond=None)
+            assert (
+                len(res) == 0 or res[0] < 1e-6
+            ) and bias is not None, (
+                "To bias the latent space, I should be in the column space of E"
+            )
+        assert type(I) is np.ndarray
+        assert type(bias) is np.ndarray or not latent_bias
+
         if c is not None:
             assert c.shape[0] == net.di, "c first dimension should be equal to di"
             assert (
@@ -242,6 +261,7 @@ class Simulation:
         self.draw_break = draw_break
         self.criterion = criterion
         self.voltage_bias = voltage_bias
+        self.latent_bias = latent_bias
         self.dt = dt
         self.Tmax = Tmax
 
@@ -254,6 +274,8 @@ class Simulation:
         self.c = c
 
         if y0 is not None:
+            if latent_bias:
+                y0 = y0 - bias
             if V0 is not None or r0 is not None:
                 raise Warning("y0 was given and prioritized over r0 and V0")
             r0, res = nnls(self.net.D, y0)
@@ -265,6 +287,13 @@ class Simulation:
             y0 = self.net.D @ r0
             V0 = self.net.E @ y0
         elif V0 is not None:
+            match voltage_bias:
+                case "F":
+                    V0 = V0 - self.net.F @ x[:, 0]
+                case "I":
+                    V0 = V0 - I[:, 0]
+                case "FI":
+                    V0 = V0 - self.net.F @ x[:, 0] - I[:, 0]
             y0 = np.linalg.lstsq(
                 self.net.E,
                 V0,
@@ -298,7 +327,6 @@ class Simulation:
             case _:
                 raise ValueError("draw_break should be 'no', 'slowmo' or 'one'")
 
-        self.y = y
         self.r = r
         self.s = s
         self.stimes = _stimes_from_s(s, dt)
@@ -314,7 +342,15 @@ class Simulation:
             case "FI":
                 V = V + self.net.F @ x + I
                 self.Tv = self.net.T[:, np.newaxis] * np.ones_like(self.I)
+
+        if not self.latent_bias:
+            self.Ty = self.net.T[:, np.newaxis] - self.net.F @ self.x - self.I
+        else:
+            y = y + bias[:, np.newaxis]
+            self.Ty = self.net.T[:, np.newaxis] - self.net.F @ self.x
+
         self.V = V
+        self.y = y
         self.time_stamp = time.strftime("%Y%m%d-%H%M%S")
         self.tag = (
             tag
@@ -513,6 +549,7 @@ class Simulation:
         I: float | np.ndarray = 0.0,
         Q: np.ndarray | None = None,
         options: list | None = None,
+        latent_bias: bool = False,
         tag: str | None = None,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
@@ -534,6 +571,10 @@ class Simulation:
 
         options : ndarray of str, default=None
             Options of the optimization. Subset of ['y_op', 'y_op_lim', 'r_op', 'r_op_lim']. If None, all are computed.
+
+        laent_bias : bool, default=False
+            If False, the latent space is not biased.
+            If True, the latent space is biased by y(t) = D r(t) + b with b such that E b = I.
 
         tag : str, default=None
             Tag of the simulation. If None, the tag is randomly generated.
@@ -592,6 +633,18 @@ class Simulation:
                 net, x, Q, I, options
             )
             # raise ValueError("Non convex optimization not implemented yet")
+
+        if latent_bias:
+            bias, res, *_ = np.linalg.lstsq(net.E, I[:, 0], rcond=None)
+            assert (
+                len(res) == 0 or res[0] < 1e-6
+            ) and bias is not None, (
+                "To bias the latent space, I should be in the column space of E"
+            )
+            if "y_op" in options:
+                y_op += bias[:, np.newaxis]
+            if "y_op_lim" in options:
+                y_op_lim += bias[:, np.newaxis]
 
         if "y_op" in options:
             self.y_op = y_op
@@ -1165,6 +1218,7 @@ class Simulation:
                 I=self.I,
                 y_op=y_op,
                 y_op_lim=y_op_lim,
+                latent_bias=self.latent_bias,
                 centered=centergeom,
                 save=False,
             )
@@ -1694,6 +1748,7 @@ class Simulation:
                 I=I,
                 y_op=y_op,
                 y_op_lim=y_op_lim,
+                latent_bias=self.latent_bias,
                 save=False,
             )
             artists.append(artists_net)
@@ -1786,6 +1841,7 @@ class Simulation:
                         y=y,
                         y_op=y_op,
                         y_op_lim=y_op_lim,
+                        latent_bias=self.latent_bias,
                         input_change=input_change,
                         current_change=current_change,
                         spiking=spiking,

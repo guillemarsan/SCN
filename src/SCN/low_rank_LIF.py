@@ -131,9 +131,6 @@ class Low_rank_LIF:
         r"""
         Optimization initialization of the Low-rank LIF network.
 
-        :math:`N` neurons spaced regularly between `angle_range[0]` and `angle_range[1]`.
-        The encoders are :math:`\mathbf{E}_i = (\cos(\alpha_i), \sin(\alpha_i))`.
-
         Network associated with the optimization problem :math: `\text{optim}^Q_y \frac{1}{2} y^\top Q y \; \text{s.t.} \;
         Ey \leq T - Fx`.
 
@@ -202,6 +199,7 @@ class Low_rank_LIF:
         y: np.ndarray | None = None,
         y_op: np.ndarray | None = None,
         y_op_lim: np.ndarray | None = None,
+        latent_bias: bool = False,
         centered: np.ndarray | None = None,
         save: bool = True,
     ) -> tuple[
@@ -233,6 +231,9 @@ class Low_rank_LIF:
 
         y_op_lim : ndarray of shape (do, time_steps), default=None
             Solution to the optimization problem with x(t) as input, in the limit of small spikes.
+
+        latent_bias : bool, default=False
+            If True, the bounding box is centered considering the input current I.
 
         centered : np.ndarray | None, default=None
             Center of the geometry for the plot. If None, it is estimated automatically.
@@ -280,26 +281,37 @@ class Low_rank_LIF:
         x0 = x[:, -1]
         I0 = I[:, -1]
 
+        if latent_bias:
+            Ty = self.T - self.F @ x0
+        else:
+            Ty = self.T - self.F @ x0 - I0
+
         # Inhibitory standard
         if centered is None:
-            negT = self.T.copy()
-            negT[self.T > 0] = 0
-            centered = np.linalg.lstsq(self.E, negT - self.F @ x0 - I0, rcond=None)[0]
+            negT = Ty.copy()
+            negT[negT > 0] = 0
+            centered = np.linalg.lstsq(self.E, negT, rcond=None)[0]
 
         artists = []
 
         # plot the network
         if self.do in {2, 3}:
             artists = (
-                self._draw_bbox_2D(centered, x0, I0, ax)
+                self._draw_bbox_2D(centered, Ty, ax)
                 if self.do == 2
-                else self._draw_bbox_3D(centered, x0, I0, ax)
+                else self._draw_bbox_3D(centered, Ty, ax)
             )
             # Y Trajectory
             if y is not None:
                 artists_y = plot._plot_traj(ax, y, gradient=True)
                 artists.append(artists_y)
-                artists_leak = plot._plot_small_vector(ax, y[:, -1], -y[:, -1])
+                if not latent_bias:
+                    artists_leak = plot._plot_small_vector(ax, y[:, -1], -y[:, -1])
+                else:
+                    bias = np.linalg.lstsq(self.E, I0, rcond=None)[0]
+                    artists_leak = plot._plot_small_vector(
+                        ax, y[:, -1], -y[:, -1] + bias
+                    )
                 artists.append(artists_leak)
 
             # y_op point
@@ -564,6 +576,7 @@ class Low_rank_LIF:
         y: np.ndarray,
         y_op: np.ndarray | None = None,
         y_op_lim: np.ndarray | None = None,
+        latent_bias: bool = False,
         input_change: bool = False,
         current_change: bool = False,
         spiking: np.ndarray | None = None,
@@ -594,6 +607,9 @@ class Low_rank_LIF:
         y_op_lim : ndarray of shape (do, time_steps), default=None
             Solution to the optimization problem with x(t) as input, in the limit of small spikes.
 
+        latent_bias : bool, default=False
+            If True, the bounding box is centered considering the input current I.
+
         input_change: bool, default=False
             If True, the input has changed.
 
@@ -611,19 +627,30 @@ class Low_rank_LIF:
             offset += 1
 
         plot._animate_traj(ax, artists[-2 - offset], y)
-        plot._animate_small_vector(artists[-1 - offset], y[:, -1], -y[:, -1])
+        if not latent_bias:
+            plot._animate_small_vector(artists[-1 - offset], y[:, -1], -y[:, -1])
+        else:
+            I0 = I[:, -1]
+            bias = np.linalg.lstsq(self.E, I0, rcond=None)[0]
+            plot._animate_small_vector(artists[-1 - offset], y[:, -1], -y[:, -1] + bias)
 
         if input_change or current_change:
             x0 = x[:, -1]
             I0 = I[:, -1]
-            negT = self.T.copy()
-            negT[self.T > 0] = 0
-            centered = np.linalg.lstsq(self.E, negT - self.F @ x0 - I0, rcond=None)[0]
+
+            if latent_bias:
+                Ty = self.T - self.F @ x0
+            else:
+                Ty = self.T - self.F @ x0 - I0
+
+            negT = Ty.copy()
+            negT[negT > 0] = 0
+            centered = np.linalg.lstsq(self.E, negT, rcond=None)[0]
 
             if self.do == 2:
-                self._draw_bbox_2D(centered, x0, I0, ax, artists)
+                self._draw_bbox_2D(centered, Ty, ax, artists)
             else:
-                self._draw_bbox_3D(centered, x0, I0, ax, artists)
+                self._draw_bbox_3D(centered, Ty, ax, artists)
 
             if y_op is not None:
                 plot._animate_scatter(artists[-offset], y_op[:, -1:])
@@ -785,8 +812,7 @@ class Low_rank_LIF:
     def _draw_bbox_2D(
         self,
         centered: np.ndarray,
-        x0: np.ndarray,
-        I0: np.ndarray,
+        Ty: np.ndarray,
         ax: matplotlib.axes.Axes,
         artists: list | None = None,
     ) -> list:
@@ -798,11 +824,8 @@ class Low_rank_LIF:
         centered : ndarray of shape (2,)
             Center of the bounding box.
 
-        x0 : ndarray of shape (di,)
-            Input of the network.
-
-        I0 : ndarray of shape (N,)
-            Input currents of the neurons.
+        Ty : ndarray of shape (N,)
+            Effective thresholds of the network.
 
         ax : matplotlib.axes.Axes
             Axes to plot the network.
@@ -834,7 +857,7 @@ class Low_rank_LIF:
             # TODO: This could be all that changes (a,b,c) so maybe this is where you need to separate
             a = self.E[n, 0]
             b = self.E[n, 1]
-            c = -self.T[n] + self.F[n, :] @ x0 + I0[n]
+            c = -Ty[n]
             yo = (
                 line_func(y1x, a, b, c)
                 if np.abs(a) < np.abs(b)
@@ -911,8 +934,7 @@ class Low_rank_LIF:
     def _draw_bbox_3D(
         self,
         centered: np.ndarray,
-        x0: np.ndarray,
-        I0: np.ndarray,
+        Ty: np.ndarray,
         ax: matplotlib.axes.Axes,
         artists: list | None = None,
     ) -> list:
@@ -924,11 +946,8 @@ class Low_rank_LIF:
         centered : ndarray of shape (2,)
             Center of the bounding box.
 
-        x0 : ndarray of shape (di,)
-            Input of the network.
-
-        I0 : ndarray of shape (N,)
-            Input currents of the neurons.
+        Ty : ndarray of shape (N,)
+            Effective thresholds of the network.
 
         ax : matplotlib.axes.Axes
             Axes to plot the network.
@@ -973,7 +992,7 @@ class Low_rank_LIF:
             a[n] = self.E[n, 0]
             b[n] = self.E[n, 1]
             c[n] = self.E[n, 2]
-            d[n] = -self.T[n] + self.F[n, :] @ x0 + I0[n]
+            d[n] = -Ty[n]
             ver[n] = (
                 0
                 if np.max(np.abs([b[n], c[n]])) < np.abs(a[n])
@@ -999,12 +1018,10 @@ class Low_rank_LIF:
 
         for n in range(self.N):
             suprathresh = np.any(
-                (self.F @ x0)[:, np.newaxis, np.newaxis]
-                + self.E[:, 0][:, np.newaxis, np.newaxis] * points[:, :, n, 0]
+                +self.E[:, 0][:, np.newaxis, np.newaxis] * points[:, :, n, 0]
                 + self.E[:, 1][:, np.newaxis, np.newaxis] * points[:, :, n, 1]
                 + self.E[:, 2][:, np.newaxis, np.newaxis] * points[:, :, n, 2]
-                + I0[:, np.newaxis, np.newaxis]
-                > self.T[:, np.newaxis, np.newaxis] + 1e-10,
+                > Ty[:, np.newaxis, np.newaxis] + 1e-10,
                 axis=0,
             )
             points[suprathresh, n, :] = np.nan

@@ -284,6 +284,46 @@ class Simulation:
         self.rtag = ""
         self.otag = ""
 
+    @classmethod
+    def init_optim(
+        cls,
+        Q: np.ndarray,
+        b: np.ndarray,
+        E: np.ndarray,
+        Tp: np.ndarray,
+        spike_scale: float = 1,
+        y0: np.ndarray | None = None,
+        r0: np.ndarray | None = None,
+        V0: np.ndarray | None = None,
+        dt: float = 0.001,
+        Tmax: float = 10,
+        tag: str | None = None,
+    ):
+
+        net = Low_rank_LIF.init_optim(
+            Q=Q, E=E, T=np.ones(E.shape[0]), spike_scale=spike_scale, Fseed=0
+        )
+
+        net.F = net.T[:, np.newaxis] - Tp[:, np.newaxis]
+        x = np.ones((1, int(Tmax / dt)))
+
+        I = -net.E @ np.linalg.inv(Q) @ b
+        I = I[:, np.newaxis] * np.ones((1, x.shape[1]))
+
+        return cls(
+            net=net,
+            x=x,
+            y0=y0,
+            r0=r0,
+            V0=V0,
+            I=I,
+            dt=dt,
+            Tmax=Tmax,
+            voltage_bias="FI",
+            latent_bias=True,
+            tag=tag,
+        )
+
     def run(
         self,
         draw_break: str = "no",

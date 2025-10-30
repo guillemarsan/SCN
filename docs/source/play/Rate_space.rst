@@ -22,8 +22,8 @@ Rate space
     x = transform.angle_encode(np.linspace(0, 1, 10000))
 
     # Run simulation
-    sim = Simulation()
-    sim.run(net, x)
+    sim = Simulation(net, x)
+    sim.run()
 
     # Animate the simulation
     sim.animate()

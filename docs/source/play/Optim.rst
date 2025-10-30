@@ -22,11 +22,11 @@ Constrained optimization
     x = transform.angle_encode(np.linspace(0, 1, 10000))
 
     # Run simulation
-    sim = Simulation()
-    sim.run(net, x)
+    sim = Simulation(net, x)
+    sim.run()
 
     # Solve constrained optimization
-    sim.optimize(net, x)
+    sim.optimize()
 
     # Animate the simulation
     sim.animate()

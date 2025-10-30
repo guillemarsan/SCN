@@ -97,7 +97,7 @@ class Simulation:
     V: np.ndarray
     r"Voltage of the neurons. :math:`N \times time\_steps`."
 
-    def run(
+    def __init__(
         self,
         net: Low_rank_LIF,
         x: np.ndarray | None = None,
@@ -105,21 +105,18 @@ class Simulation:
         r0: np.ndarray | None = None,
         V0: np.ndarray | None = None,
         I: float | np.ndarray = 0.0,
-        draw_break: str = "no",
-        criterion: str = "max",
-        voltage_bias: str = "",
-        latent_bias: bool = False,
+        c: np.ndarray | None = None,
         dt: float = 0.001,
         Tmax: float = 10,
-        c: np.ndarray | None = None,
+        voltage_bias: str = "",
+        latent_bias: bool = False,
         tag: str | None = None,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    ):
         """
-        Run the network.
+        Initialize the simulation.
 
         Parameters
         ----------
-
         net : Low_rank_LIF
             Network to run.
 
@@ -138,18 +135,14 @@ class Simulation:
         I : float or ndrray of shape (N, time_steps), default=0
             External input current.
 
-        draw_break : str, default='no'
-            How to break a draw between spikes:
-            - 'no': neurons spike at once in the same time
-            - 'slowmo': neurons spike one after the other in the same time step
-            - 'one': only one neuron spikes at each time step
+        c : ndarray of shape (di,time_steps), default=None
+            Filtered input to the network. Only x or c should be provided.
 
-        criterion : str, default='max'
-            How to choose the neuron to spike in case draw_break='slowmo' or 'one':
-            - 'max': neuron with the highest voltage spikes
-            - 'rand': neuron is chosen randomly
-            - 'inh_max': neuron with the highest voltage spikes (all inhibitory priority)
-            - 'inh_rand': neuron is chosen randomly (all inhibitory priority)
+        dt : float, default=0.001
+            Time step of the simulation (s).
+
+        Tmax : float, default=10
+            Duration of the simulation (s)
 
         voltage_bias : str, default=""
             If "", the voltage is not biased.
@@ -161,42 +154,11 @@ class Simulation:
             If False, the latent space is not biased.
             If True, the latent space is biased by y(t) = D r(t) + b with b such that E b = I.
 
-        dt : float, default=0.001
-            Time step of the simulation (s).
-
-        Tmax : float, default=10
-            Duration of the simulation (s)
-
-        c : ndarray of shape (di,time_steps)
-            Filtered input to the network. Only x or c should be provided.
-
         tag : str, default=None
             Tag of the simulation. If None, the tag is randomly generated.
-
-        Returns
-        -------
-        y: ndarray of shape (do,time_steps)
-            Output of the network.
-
-        r: ndarray of shape (N,time_steps)
-            Rate of the neurons.
-
-        s: ndarray(bool) of shape (N,time_steps)
-            Spike trains of the neurons.
-
-        V: ndarray of shape (N,time_steps)
-            Voltage of the neurons.
         """
 
         time_steps = int(Tmax / dt)
-
-        assert voltage_bias in {
-            "",
-            "F",
-            "I",
-            "FI",
-        }, "voltage_bias should be '', 'F', 'I' or 'FI'"
-
         if x is not None and c is not None:
             raise Warning("Both x and c provided, c will be used")
         elif x is not None:
@@ -258,10 +220,9 @@ class Simulation:
 
         self.net = net
         self.I = I
-        self.draw_break = draw_break
-        self.criterion = criterion
         self.voltage_bias = voltage_bias
         self.latent_bias = latent_bias
+        self.bias = bias
         self.dt = dt
         self.Tmax = Tmax
 
@@ -311,10 +272,63 @@ class Simulation:
                 y0 = np.zeros(self.net.do)
                 r0 = np.zeros(self.net.N)
                 V0 = self.net.E @ y0
-
         self.y0 = y0
         self.r0 = r0
         self.V0 = V0
+
+        self.stag = (
+            "s" + tag
+            if tag is not None
+            else "s" + "".join(random.choice(string.ascii_letters) for i in range(5))
+        )
+        self.rtag = ""
+        self.otag = ""
+
+    def run(
+        self,
+        draw_break: str = "no",
+        criterion: str = "max",
+        tag: str | None = None,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Run the network.
+
+        Parameters
+        ----------
+
+        draw_break : str, default='no'
+            How to break a draw between spikes:
+            - 'no': neurons spike at once in the same time
+            - 'slowmo': neurons spike one after the other in the same time step
+            - 'one': only one neuron spikes at each time step
+
+        criterion : str, default='max'
+            How to choose the neuron to spike in case draw_break='slowmo' or 'one':
+            - 'max': neuron with the highest voltage spikes
+            - 'rand': neuron is chosen randomly
+            - 'inh_max': neuron with the highest voltage spikes (all inhibitory priority)
+            - 'inh_rand': neuron is chosen randomly (all inhibitory priority)
+
+        tag : str, default=None
+            Tag of the run. If None, the tag is randomly generated.
+
+        Returns
+        -------
+        y: ndarray of shape (do,time_steps)
+            Output of the network.
+
+        r: ndarray of shape (N,time_steps)
+            Rate of the neurons.
+
+        s: ndarray(bool) of shape (N,time_steps)
+            Spike trains of the neurons.
+
+        V: ndarray of shape (N,time_steps)
+            Voltage of the neurons.
+        """
+
+        self.draw_break = draw_break
+        self.criterion = criterion
 
         match draw_break:
 
@@ -329,33 +343,34 @@ class Simulation:
 
         self.r = r
         self.s = s
-        self.stimes = _stimes_from_s(s, dt)
+        self.stimes = _stimes_from_s(s, self.dt)
         match self.voltage_bias:
             case "":
                 self.Tv = self.net.T[:, np.newaxis] - self.net.F @ self.x - self.I
             case "F":
-                V = V + self.net.F @ x
+                V = V + self.net.F @ self.x
                 self.Tv = self.net.T[:, np.newaxis] - self.I
             case "I":
-                V = V + I
+                V = V + self.I
                 self.Tv = self.net.T[:, np.newaxis] - self.net.F @ self.x
             case "FI":
-                V = V + self.net.F @ x + I
+                V = V + self.net.F @ self.x + self.I
                 self.Tv = self.net.T[:, np.newaxis] * np.ones_like(self.I)
 
         if not self.latent_bias:
             self.Ty = self.net.T[:, np.newaxis] - self.net.F @ self.x - self.I
         else:
-            y = y + bias[:, np.newaxis]
+            y = y + self.bias[:, np.newaxis]
             self.Ty = self.net.T[:, np.newaxis] - self.net.F @ self.x
 
         self.V = V
         self.y = y
+
         self.time_stamp = time.strftime("%Y%m%d-%H%M%S")
-        self.tag = (
-            tag
+        self.rtag = (
+            "r" + tag
             if tag is not None
-            else "".join(random.choice(string.ascii_letters) for i in range(5))
+            else "r" + "".join(random.choice(string.ascii_letters) for i in range(2))
         )
 
         return y, r, s, V
@@ -544,12 +559,8 @@ class Simulation:
 
     def optimize(
         self,
-        net: Low_rank_LIF,
-        x: np.ndarray,
-        I: float | np.ndarray = 0.0,
         Q: np.ndarray | None = None,
         options: list | None = None,
-        latent_bias: bool = False,
         tag: str | None = None,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
@@ -557,14 +568,6 @@ class Simulation:
 
         Parameters
         ----------
-        net : Low_rank_LIF
-            Network to optimize.
-
-        x : ndarray of shape (di,time_steps)
-            Input to the network.
-
-        I : float or ndarray of shape (N, time_steps), default=0
-            External input current.
 
         Q : ndarray of shape (do,do), default=None
             Matrix of the optimization. If None, it is inferred from the decoders and encoders.
@@ -572,12 +575,8 @@ class Simulation:
         options : ndarray of str, default=None
             Options of the optimization. Subset of ['y_op', 'y_op_lim', 'r_op', 'r_op_lim']. If None, all are computed.
 
-        laent_bias : bool, default=False
-            If False, the latent space is not biased.
-            If True, the latent space is biased by y(t) = D r(t) + b with b such that E b = I.
-
         tag : str, default=None
-            Tag of the simulation. If None, the tag is randomly generated.
+            Tag of the optimization. If None, the tag is randomly generated.
 
         Returns
         -------
@@ -595,56 +594,35 @@ class Simulation:
         """
 
         if Q is None:
-            Q, residuals, _, _ = np.linalg.lstsq(net.D.T, -net.E, rcond=None)
+            Q, residuals, _, _ = np.linalg.lstsq(self.net.D.T, -self.net.E, rcond=None)
             assert (
                 np.allclose(residuals, 0, atol=1e-10)
                 and np.allclose(Q, Q.T, atol=1e-10)
                 and np.all(np.linalg.eigvals(Q) >= 0)
             ), "Q inference only possibe for convex case with N>=do: There must be a unique matrix Q such that Q sym, Q>0 and QD = -E^T"
         else:
-            assert Q.shape[0] == net.do, "Q first dimension should be equal to do"
-            assert Q.shape[1] == net.do, "Q second dimension should be equal to do"
+            assert Q.shape[0] == self.net.do, "Q first dimension should be equal to do"
+            assert Q.shape[1] == self.net.do, "Q second dimension should be equal to do"
             assert np.allclose(Q, Q.T, atol=1e-10), "Q should be symmetric"
 
         if options is None:
             options = ["y_op", "y_op_lim", "r_op", "r_op_lim"]
 
-        if x.ndim == 1:
-            time_steps = int(self.Tmax / self.dt) if hasattr(self, "Tmax") else 10000
-            x = np.tile(x[:, np.newaxis], (1, time_steps))
-
-        if type(I) is float:
-            I = I * np.ones((net.N, x.shape[1]))
-        else:
-            assert type(I) is np.ndarray, "I should be a float or a ndarray"
-            assert I.shape[0] == net.N, "I first dimension should be equal to N"
-            assert (
-                I.shape[1] == x.shape[1]
-            ), "I second dim. should be equal to time_steps"
-
         if np.all(
             np.linalg.eigvals(Q) >= 0
         ):  # positive semidefinite -> convex optimization
-            y_op, y_op_lim, r_op, r_op_lim = self._optimize_cvx(net, x, Q, I, options)
+            y_op, y_op_lim, r_op, r_op_lim = self._optimize_cvx(Q, options)
         else:
             # not positive semidefinite -> non-convex optimization
             # TODO
-            y_op, y_op_lim, r_op, r_op_lim = self._optimize_cvx_ccv3(
-                net, x, Q, I, options
-            )
+            y_op, y_op_lim, r_op, r_op_lim = self._optimize_cvx_ccv3(Q, options)
             # raise ValueError("Non convex optimization not implemented yet")
 
-        if latent_bias:
-            bias, res, *_ = np.linalg.lstsq(net.E, I[:, 0], rcond=None)
-            assert (
-                len(res) == 0 or res[0] < 1e-6
-            ) and bias is not None, (
-                "To bias the latent space, I should be in the column space of E"
-            )
+        if self.latent_bias:
             if "y_op" in options:
-                y_op += bias[:, np.newaxis]
+                y_op += self.bias[:, np.newaxis]
             if "y_op_lim" in options:
-                y_op_lim += bias[:, np.newaxis]
+                y_op_lim += self.bias[:, np.newaxis]
 
         if "y_op" in options:
             self.y_op = y_op
@@ -655,75 +633,80 @@ class Simulation:
         if "r_op_lim" in options:
             self.r_op_lim = r_op_lim
 
-        self.tag = (
-            tag
+        self.time_stamp = time.strftime("%Y%m%d-%H%M%S")
+        self.otag = (
+            "o" + tag
             if tag is not None
-            else "".join(random.choice(string.ascii_letters) for i in range(5))
+            else "o" + "".join(random.choice(string.ascii_letters) for i in range(2))
         )
 
         return y_op, y_op_lim, r_op, r_op_lim
 
-    def _optimize_cvx(self, net, x, Q, I, options):
+    def _optimize_cvx(self, Q, options):
 
-        inps = np.vstack([x, I])
+        inps = np.vstack([self.x, self.I])
         inps_values = np.unique(inps, axis=1)
 
-        xp = cp.Parameter(net.di)
-        Ip = cp.Parameter(net.N)
+        xp = cp.Parameter(self.net.di)
+        Ip = cp.Parameter(self.net.N)
 
         probs = []
-        y_opv = cp.Variable(net.do)
-        y_opv_lim = cp.Variable(net.do)
-        r_opv = cp.Variable(net.N)
-        r_opv_lim = cp.Variable(net.N)
+        y_opv = cp.Variable(self.net.do)
+        y_opv_lim = cp.Variable(self.net.do)
+        r_opv = cp.Variable(self.net.N)
+        r_opv_lim = cp.Variable(self.net.N)
         if "y_op" in options:
             obj = cp.Minimize(y_opv.T @ Q @ y_opv)
             constraints = [
-                net.F @ xp
-                + net.E @ y_opv
+                self.net.F @ xp
+                + self.net.E @ y_opv
                 + Ip
-                - net.T
-                + np.diag(net.D.T @ Q @ net.D) / 2
+                - self.net.T
+                + np.diag(self.net.D.T @ Q @ self.net.D) / 2
                 <= 0
             ]
             prob = cp.Problem(obj, constraints)
             probs.append(prob)
         if "y_op_lim" in options:
             obj = cp.Minimize(y_opv_lim.T @ Q @ y_opv_lim)
-            constraints = [net.F @ xp + net.E @ y_opv_lim + Ip - net.T <= 0]
+            constraints = [
+                self.net.F @ xp + self.net.E @ y_opv_lim + Ip - self.net.T <= 0
+            ]
             prob = cp.Problem(obj, constraints)
             probs.append(prob)
         if "r_op" in options:
             obj = cp.Minimize(
-                -2 * r_opv.T @ net.F @ xp
-                + cp.quad_form(net.D @ r_opv, Q)
-                + 2 * r_opv.T @ (net.T - Ip - np.diag(net.D.T @ Q @ net.D) / 2)
+                -2 * r_opv.T @ self.net.F @ xp
+                + cp.quad_form(self.net.D @ r_opv, Q)
+                + 2
+                * r_opv.T
+                @ (self.net.T - Ip - np.diag(self.net.D.T @ Q @ self.net.D) / 2)
             )
             constraints = [r_opv >= 0]
             prob = cp.Problem(obj, list(constraints))
             probs.append(prob)
         if "r_op_lim" in options:
             obj = cp.Minimize(
-                -2 * r_opv_lim.T @ net.F @ xp
-                + cp.quad_form(net.D @ r_opv_lim, Q)
-                + 2 * r_opv_lim.T @ (net.T - Ip)
+                -2 * r_opv_lim.T @ self.net.F @ xp
+                + cp.quad_form(self.net.D @ r_opv_lim, Q)
+                + 2 * r_opv_lim.T @ (self.net.T - Ip)
             )
             constraints = [r_opv_lim >= 0]
             prob = cp.Problem(obj, list(constraints))
             probs.append(prob)
 
-        y_op = np.zeros((net.do, x.shape[1]))
-        y_op_lim = np.zeros((net.do, x.shape[1]))
-        r_op = np.zeros((net.N, x.shape[1]))
-        r_op_lim = np.zeros((net.N, x.shape[1]))
+        y_op = np.zeros((self.net.do, self.x.shape[1]))
+        y_op_lim = np.zeros((self.net.do, self.x.shape[1]))
+        r_op = np.zeros((self.net.N, self.x.shape[1]))
+        r_op_lim = np.zeros((self.net.N, self.x.shape[1]))
         for j in range(inps_values.shape[1]):
-            x_value = inps_values[: net.di, j]
-            I_value = inps_values[net.di :, j]
+            x_value = inps_values[: self.net.di, j]
+            I_value = inps_values[self.net.di :, j]
             xp.value = x_value
             Ip.value = I_value
             cols = np.where(
-                np.all(x == x_value[:, np.newaxis], axis=0)
-                * np.all(I == I_value[:, np.newaxis], axis=0)
+                np.all(self.x == x_value[:, np.newaxis], axis=0)
+                * np.all(self.I == I_value[:, np.newaxis], axis=0)
             )[0]
             for prob in probs:
                 prob.solve()
@@ -751,17 +734,17 @@ class Simulation:
 
         return y_op, y_op_lim, r_op, r_op_lim
 
-    def _optimize_cvx_ccv3(self, net, x, Q, I, options):
+    def _optimize_cvx_ccv3(self, Q, options):
 
-        x_values = np.unique(x, axis=1)
+        x_values = np.unique(self.x, axis=1)
 
         Q_norm = Q  # / Q[0, 0]
         A, S = _canon_symmetric(Q_norm)
-        EAL = net.E @ np.linalg.pinv(A)
+        EAL = self.net.E @ np.linalg.pinv(A)
 
-        jump = np.diag(net.W)
-        C_op = net.T - I[:, 0] + jump / 2
-        C_op_lim = net.T - I[:, 0]
+        jump = np.diag(self.net.W)
+        C_op = self.net.T - self.I[:, 0] + jump / 2
+        C_op_lim = self.net.T - self.I[:, 0]
 
         signs = np.diag(S)
         maxs = np.sum(signs == -1)
@@ -779,13 +762,13 @@ class Simulation:
                 prob = GEKKO(remote=False)
 
                 z_max = prob.Array(prob.Var, maxs)
-                lamb = prob.Array(prob.Var, net.N)
-                z_min = prob.Array(prob.Var, net.do - maxs)
-                xp = prob.Array(prob.FV, net.di)
+                lamb = prob.Array(prob.Var, self.net.N)
+                z_min = prob.Array(prob.Var, self.net.do - maxs)
+                xp = prob.Array(prob.FV, self.net.di)
 
-                for i in range(net.N):
+                for i in range(self.net.N):
                     prob.Equation(
-                        net.F[i, :] @ xp
+                        self.net.F[i, :] @ xp
                         + EAL[i, mins:] @ z_max
                         + EAL[i, :mins] @ z_min
                         - C[i]
@@ -795,7 +778,7 @@ class Simulation:
                     prob.Equation(
                         lamb[i]
                         * (
-                            net.F[i, :] @ xp
+                            self.net.F[i, :] @ xp
                             + EAL[i, mins:] @ z_max
                             + EAL[i, :mins] @ z_min
                             - C[i]
@@ -832,21 +815,24 @@ class Simulation:
 
                 if rmaxs == 0:  # all coupled constraints -> min r
                     print("all coupled constraints")
-                    r = prob.Array(prob.Var, net.N)
-                    xp = prob.Array(prob.FV, net.di)
+                    r = prob.Array(prob.Var, self.net.N)
+                    xp = prob.Array(prob.FV, self.net.di)
 
-                    for i in range(net.N):
+                    for i in range(self.net.N):
                         prob.Equation(-r[i] <= 0)
 
                     quad = sum(
                         [
-                            r[i] * net.W[i][j] * r[j]
-                            for i in range(net.N)
-                            for j in range(net.N)
+                            r[i] * self.net.W[i][j] * r[j]
+                            for i in range(self.net.N)
+                            for j in range(self.net.N)
                         ]
                     )
                     cost = 2 * sum(
-                        [r[i] * (C[i] - net.F[i, :] @ xp) for i in range(net.N)]
+                        [
+                            r[i] * (C[i] - self.net.F[i, :] @ xp)
+                            for i in range(self.net.N)
+                        ]
                     )
                     prob.Obj(-quad + cost)
                     return {"input": xp, "r": r, "prob": prob}
@@ -854,7 +840,7 @@ class Simulation:
                     r_max = prob.Array(prob.Var, rmaxs)
                     lamb = prob.Array(prob.Var, rmaxs)
                     r_min = prob.Array(prob.Var, rmins)
-                    xp = prob.Array(prob.FV, net.di)
+                    xp = prob.Array(prob.FV, self.net.di)
 
                     for i in range(rmaxs):
                         prob.Equation(-r_max[i] <= 0)
@@ -866,18 +852,18 @@ class Simulation:
                             -2
                             * sum(
                                 [
-                                    r_min[j] * net.W[rmin_idx[j], imax]
+                                    r_min[j] * self.net.W[rmin_idx[j], imax]
                                     for j in range(rmins)
                                 ]
                             )
                             + 2
                             * sum(
                                 [
-                                    r_max[j] * net.W[rmax_idx[j], imax]
+                                    r_max[j] * self.net.W[rmax_idx[j], imax]
                                     for j in range(rmaxs)
                                 ]
                             )
-                            - 2 * (C[imax] - net.F[imax, :] @ xp)
+                            - 2 * (C[imax] - self.net.F[imax, :] @ xp)
                             + lamb[i]
                             == 0
                         )
@@ -887,34 +873,36 @@ class Simulation:
 
                     quad_minmin = sum(
                         [
-                            r_min[i] * net.W[rmin_idx[i], rmin_idx[j]] * r_min[j]
+                            r_min[i] * self.net.W[rmin_idx[i], rmin_idx[j]] * r_min[j]
                             for i in range(rmins)
                             for j in range(rmins)
                         ]
                     )
                     quad_minmax = sum(
                         [
-                            r_min[i] * net.W[rmin_idx[i], rmax_idx[j]] * r_max[j]
+                            r_min[i] * self.net.W[rmin_idx[i], rmax_idx[j]] * r_max[j]
                             for i in range(rmins)
                             for j in range(rmaxs)
                         ]
                     )
                     quad_maxmax = sum(
                         [
-                            r_max[i] * net.W[rmax_idx[i], rmax_idx[j]] * r_max[j]
+                            r_max[i] * self.net.W[rmax_idx[i], rmax_idx[j]] * r_max[j]
                             for i in range(rmaxs)
                             for j in range(rmaxs)
                         ]
                     )
                     cost_min = 2 * sum(
                         [
-                            r_min[i] * (C[rmin_idx[i]] - net.F[rmin_idx[i], :] @ xp)
+                            r_min[i]
+                            * (C[rmin_idx[i]] - self.net.F[rmin_idx[i], :] @ xp)
                             for i in range(rmins)
                         ]
                     )
                     cost_max = 2 * sum(
                         [
-                            r_max[i] * (C[rmax_idx[i]] - net.F[rmax_idx[i], :] @ xp)
+                            r_max[i]
+                            * (C[rmax_idx[i]] - self.net.F[rmax_idx[i], :] @ xp)
                             for i in range(rmaxs)
                         ]
                     )
@@ -937,15 +925,15 @@ class Simulation:
                 prob_dict["name"] = "prob_r_op_lim"
                 probs.append(prob_dict)
 
-        y_op = np.zeros((net.do, x.shape[1]))
-        y_op_lim = np.zeros((net.do, x.shape[1]))
-        r_op = np.zeros((net.N, x.shape[1]))
-        r_op_lim = np.zeros((net.N, x.shape[1]))
+        y_op = np.zeros((self.net.do, self.x.shape[1]))
+        y_op_lim = np.zeros((self.net.do, self.x.shape[1]))
+        r_op = np.zeros((self.net.N, self.x.shape[1]))
+        r_op_lim = np.zeros((self.net.N, self.x.shape[1]))
         for j in range(x_values.shape[1]):
-            cols = np.where(np.all(x == x_values[:, j : j + 1], axis=0))[0]
+            cols = np.where(np.all(self.x == x_values[:, j : j + 1], axis=0))[0]
 
             for prob_dict in probs:
-                for i in range(net.di):
+                for i in range(self.net.di):
                     prob_dict["input"][i].value = x_values[i, j]
 
                 # initial guess
@@ -956,7 +944,9 @@ class Simulation:
                         y_init = self.y[:, cols[-1]]
                     else:  # initialize at least in feasible region
                         y_init = np.linalg.lstsq(
-                            net.E, C_op + net.F @ x_values[:, j] - 1e-2, rcond=None
+                            self.net.E,
+                            C_op + self.net.F @ x_values[:, j] - 1e-2,
+                            rcond=None,
                         )[0]
                     z_init = A @ y_init
                     z_max_init = z_init[mins:]
@@ -972,16 +962,16 @@ class Simulation:
                     ):  # initialize guess near last r with this input
                         r_init = self.r[:, cols[-1]]
                     else:  # initialize at least in feasible region
-                        r_init = 1e-2 * np.ones(net.N)
+                        r_init = 1e-2 * np.ones(self.net.N)
                     if rmaxs == 0:
-                        for i in range(net.N):
+                        for i in range(self.net.N):
                             prob_dict["r"][i].value = r_init[i]
                     else:
                         r_max_init = r_init[rmax_idx]
                         r_min_init = r_init[rmin_idx]
                         for i in range(rmaxs):
                             prob_dict["r_max"][i].value = r_max_init[i]
-                        for i in range(net.do - rmaxs):
+                        for i in range(self.net.do - rmaxs):
                             prob_dict["r_min"][i].value = r_min_init[i]
 
                 prob = prob_dict["prob"]
@@ -1024,7 +1014,10 @@ class Simulation:
                             [prob_dict["z_max"][i].value for i in range(maxs)]
                         )
                         z_min = np.array(
-                            [prob_dict["z_min"][i].value for i in range(net.do - maxs)]
+                            [
+                                prob_dict["z_min"][i].value
+                                for i in range(self.net.do - maxs)
+                            ]
                         )
                         y_op_lim_val = np.linalg.pinv(A) @ np.vstack((z_min, z_max))
                         y_op_lim[:, cols] = y_op_lim_val
@@ -1034,7 +1027,7 @@ class Simulation:
                     if not fail:
                         if rmaxs == 0:
                             r_op[:, cols] = np.array(
-                                [prob_dict["r"][i].value for i in range(net.N)]
+                                [prob_dict["r"][i].value for i in range(self.net.N)]
                             )
                         else:
                             r_max = np.array(
@@ -1043,7 +1036,7 @@ class Simulation:
                             r_min = np.array(
                                 [
                                     prob_dict["r_min"][i].value
-                                    for i in range(net.N - rmaxs)
+                                    for i in range(self.net.N - rmaxs)
                                 ]
                             )
                             r_op[np.ix_(rmax_idx, cols)] = r_max
@@ -1055,7 +1048,7 @@ class Simulation:
                     if not fail:
                         if rmaxs == 0:
                             r_op_lim[:, cols] = np.array(
-                                [prob_dict["r"][i].value for i in range(net.N)]
+                                [prob_dict["r"][i].value for i in range(self.net.N)]
                             )
                         else:
                             r_max = np.array(
@@ -1064,7 +1057,7 @@ class Simulation:
                             r_min = np.array(
                                 [
                                     prob_dict["r_min"][i].value
-                                    for i in range(net.N - rmaxs)
+                                    for i in range(self.net.N - rmaxs)
                                 ]
                             )
                             r_op_lim[np.ix_(rmax_idx, cols)] = r_max
@@ -1249,7 +1242,17 @@ class Simulation:
 
         plt.tight_layout()
         if save:
-            _save_fig(fig, self.time_stamp + "-" + self.tag + "-plot.svg")
+            _save_fig(
+                fig,
+                self.time_stamp
+                + "-"
+                + self.stag
+                + "-"
+                + self.rtag
+                + "-"
+                + self.otag
+                + "-plot.svg",
+            )
 
         return fig, axes, artists
 
@@ -1358,7 +1361,17 @@ class Simulation:
         assert fig is not None
         if save:
             assert type(fig) is matplotlib.figure.Figure
-            _save_fig(fig, self.time_stamp + "-" + self.tag + "-io-plot.png")
+            _save_fig(
+                fig,
+                self.time_stamp
+                + "-"
+                + self.stag
+                + "-"
+                + self.rtag
+                + "-"
+                + self.otag
+                + "-ioplot.svg",
+            )
 
         return fig, ax, artists
 
@@ -1424,7 +1437,17 @@ class Simulation:
         assert fig is not None
         if save:
             assert type(fig) is matplotlib.figure.Figure
-            _save_fig(fig, self.time_stamp + "-" + self.tag + "-spikes-plot.png")
+            _save_fig(
+                fig,
+                self.time_stamp
+                + "-"
+                + self.stag
+                + "-"
+                + self.rtag
+                + "-"
+                + self.otag
+                + "-spikesplot.svg",
+            )
 
         return fig, ax, artists
 
@@ -1523,7 +1546,17 @@ class Simulation:
         assert fig is not None
         if save:
             assert type(fig) is matplotlib.figure.Figure
-            _save_fig(fig, self.time_stamp + "-" + self.tag + "-rates-plot.png")
+            _save_fig(
+                fig,
+                self.time_stamp
+                + "-"
+                + self.stag
+                + "-"
+                + self.rtag
+                + "-"
+                + self.otag
+                + "-ratesplot.svg",
+            )
 
         return fig, ax, artists
 
@@ -1602,7 +1635,17 @@ class Simulation:
         assert fig is not None
         if save:
             assert type(fig) is matplotlib.figure.Figure
-            _save_fig(fig, self.time_stamp + "-" + self.tag + "-voltages-plot.png")
+            _save_fig(
+                fig,
+                self.time_stamp
+                + "-"
+                + self.stag
+                + "-"
+                + self.rtag
+                + "-"
+                + self.otag
+                + "-voltagesplot.svg",
+            )
 
         return fig, ax, artists
 
@@ -1886,7 +1929,18 @@ class Simulation:
             blit=True,
         )
 
-        _save_ani(ani, self.time_stamp + "-" + self.tag + "-animation.gif", anim_freq)
+        _save_ani(
+            ani,
+            self.time_stamp
+            + "-"
+            + self.stag
+            + "-"
+            + self.rtag
+            + "-"
+            + self.otag
+            + "-animation.gif",
+            anim_freq,
+        )
 
     def _animate_io(self, artists: list, t: float) -> None:
         """

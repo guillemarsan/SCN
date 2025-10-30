@@ -14,8 +14,8 @@ def test_pretty_single_population():
     x = np.hstack([x1, x2])
 
     # Run simulation
-    sim = Simulation()
-    sim.run(net, x, y0=np.array([0, -1]))
+    sim = Simulation(net, x, y0=np.array([0, -1]))
+    sim.run()
 
     # Animate the simulation
     sim.animate()

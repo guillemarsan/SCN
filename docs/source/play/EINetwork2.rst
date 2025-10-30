@@ -32,8 +32,8 @@
     x = np.hstack([x1, x2])
 
     # Run simulation
-    sim = Simulation()
-    sim.run(net, x, draw_break="one", criterion="inh_max", y0=np.array([0, -1]))
+    sim = Simulation(net, x, y0=np.array([0, -1]))
+    sim.run(draw_break="one", criterion="inh_max")
 
     # Animate the simulation
     sim.animate(rate_space=False)

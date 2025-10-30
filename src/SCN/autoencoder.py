@@ -301,6 +301,8 @@ class Autoencoder(Low_rank_LIF):
         y: np.ndarray | None = None,
         y_op: np.ndarray | None = None,
         y_op_lim: np.ndarray | None = None,
+        latent_bias: bool = False,
+        centered: np.ndarray | None = None,
         save: bool = True,
     ) -> tuple[
         matplotlib.figure.Figure | matplotlib.figure.SubFigure,
@@ -369,18 +371,23 @@ class Autoencoder(Low_rank_LIF):
             I = I[:, np.newaxis]
 
         # Bounding box
-        centered = x[:, -1]
-        x0 = centered
+        x0 = x[:, -1]
         I0 = I[:, -1]
+        centered = x0 if centered is None else centered
+
+        if latent_bias:
+            Ty = self.T - self.F @ x0
+        else:
+            Ty = self.T - self.F @ x0 - I0
 
         artists = []
 
         # plot the network
         if self.di in {2, 3}:
             if self.di == 2:
-                artists = self._draw_bbox_2D(centered, x0, I0, ax)
+                artists = self._draw_bbox_2D(centered, Ty, ax)
             else:
-                artists = self._draw_bbox_3D(centered, x0, I0, ax)
+                artists = self._draw_bbox_3D(centered, Ty, ax)
 
             # X Trajectory
             artists_x = plot._plot_traj(ax, x, gradient=False)
@@ -422,6 +429,7 @@ class Autoencoder(Low_rank_LIF):
         y: np.ndarray,
         y_op: np.ndarray | None = None,
         y_op_lim: np.ndarray | None = None,
+        latent_bias: bool = False,
         input_change: bool = False,
         current_change: bool = False,
         spiking: np.ndarray | None = None,
@@ -481,10 +489,16 @@ class Autoencoder(Low_rank_LIF):
             if current_change:
                 x0 = x[:, -1] + centered
                 I0 = I[:, -1]
-                if self.do == 2:
-                    self._draw_bbox_2D(x[:, 0], x0, I0, ax, artists)
+
+                if latent_bias:
+                    Ty = self.T - self.F @ x0
                 else:
-                    self._draw_bbox_3D(x[:, 0], x0, I0, ax, artists)
+                    Ty = self.T - self.F @ x0 - I0
+
+                if self.do == 2:
+                    self._draw_bbox_2D(x[:, 0], Ty, ax, artists)
+                else:
+                    self._draw_bbox_3D(x[:, 0], Ty, ax, artists)
 
             xinv = x + centered[:, np.newaxis]
             plot._animate_traj(ax, artists[-3 - offset], traj=xinv, gradient=False)

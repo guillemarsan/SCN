@@ -12,8 +12,8 @@ def test_pretty_autoencoder_3D():
     x = transform.angle_encode(np.linspace(-np.pi / 2, np.pi / 2, 10000), dim=3)
 
     # Run simulation
-    sim = Simulation()
-    sim.run(net, x)
+    sim = Simulation(net, x)
+    sim.run()
 
     # Animate the simulation
     sim.animate()

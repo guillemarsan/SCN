@@ -1,3 +1,5 @@
+import os
+import pickle
 import random
 import string
 import time
@@ -276,6 +278,7 @@ class Simulation:
         self.r0 = r0
         self.V0 = V0
 
+        self.time_stamp = time.strftime("%Y%m%d-%H%M%S")
         self.stag = (
             "s" + tag
             if tag is not None
@@ -406,7 +409,6 @@ class Simulation:
         self.V = V
         self.y = y
 
-        self.time_stamp = time.strftime("%Y%m%d-%H%M%S")
         self.rtag = (
             "r" + tag
             if tag is not None
@@ -652,6 +654,10 @@ class Simulation:
             np.linalg.eigvals(Q) >= 0
         ):  # positive semidefinite -> convex optimization
             y_op, y_op_lim, r_op, r_op_lim = self._optimize_cvx(Q, options)
+        elif np.all(
+            np.linalg.eigvals(Q) < 0
+        ):  # negative definite -> concave optimization
+            y_op, y_op_lim, r_op, r_op_lim = self._optimize_cvx(-Q, options)
         else:
             # not positive semidefinite -> non-convex optimization
             # TODO
@@ -673,7 +679,6 @@ class Simulation:
         if "r_op_lim" in options:
             self.r_op_lim = r_op_lim
 
-        self.time_stamp = time.strftime("%Y%m%d-%H%M%S")
         self.otag = (
             "o" + tag
             if tag is not None
@@ -786,12 +791,19 @@ class Simulation:
         C_op = self.net.T - self.I[:, 0] + jump / 2
         C_op_lim = self.net.T - self.I[:, 0]
 
+        # Gekko limited memory
+        EAL = np.round(EAL, decimals=6)
+        C_op = np.round(C_op, decimals=6)
+        C_op_lim = np.round(C_op_lim, decimals=6)
+        F = np.round(self.net.F, decimals=6)
+        W = np.round(self.net.W, decimals=6)
+
         signs = np.diag(S)
         maxs = np.sum(signs == -1)
         mins = np.sum(signs == 1)
 
-        rmax_idx = np.where(EAL[:, :mins] == 0)[0]
-        rmin_idx = np.where(EAL[:, :mins] != 0)[0]
+        rmax_idx = np.where(np.all(EAL[:, :mins] == 0, axis=1))[0]
+        rmin_idx = np.where(np.any(EAL[:, :mins] != 0, axis=1))[0]
         rmaxs = rmax_idx.shape[0]
         rmins = rmin_idx.shape[0]
 
@@ -802,37 +814,43 @@ class Simulation:
                 prob = GEKKO(remote=False)
 
                 z_max = prob.Array(prob.Var, maxs)
-                lamb = prob.Array(prob.Var, self.net.N)
-                z_min = prob.Array(prob.Var, self.net.do - maxs)
-                xp = prob.Array(prob.FV, self.net.di)
+                lamb = prob.Array(prob.Var, self.net.N, lb=0.0)
+                xp = prob.Array(prob.Param, self.net.di)
+
+                z_min_expr = [-lamb @ EAL[:, i] for i in range(mins)]
 
                 for i in range(self.net.N):
                     prob.Equation(
-                        self.net.F[i, :] @ xp
+                        F[i, :] @ xp
+                        + EAL[i, :mins] @ z_min_expr
                         + EAL[i, mins:] @ z_max
-                        + EAL[i, :mins] @ z_min
                         - C[i]
                         <= 0
                     )
-                    prob.Equation(lamb[i] >= 0)
-                    prob.Equation(
-                        lamb[i]
-                        * (
-                            self.net.F[i, :] @ xp
-                            + EAL[i, mins:] @ z_max
-                            + EAL[i, :mins] @ z_min
-                            - C[i]
-                        )
-                        == 0
-                    )
-                for i in range(mins):
-                    prob.Equation(z_min[i] == -lamb @ EAL[:, i])
 
-                prob.Obj(
-                    sum([z_max[i] ** 2 for i in range(maxs)])
-                    - sum([z_min[i] ** 2 for i in range(mins)])
-                )
-                return {"input": xp, "z_max": z_max, "z_min": z_min, "prob": prob}
+                alpha = 1e6  # penalty coefficient
+                penalty_terms = [
+                    lamb[i]
+                    * (
+                        F[i, :] @ xp
+                        + EAL[i, :mins] @ z_min_expr
+                        + EAL[i, mins:] @ z_max
+                        - C[i]
+                    )
+                    for i in range(self.net.N)
+                ]
+                penalty = alpha * sum([t**2 for t in penalty_terms])
+                z_max_sum = sum([z_max[i] ** 2 for i in range(maxs)])
+                z_min_sum = sum([z_min_expr[i] ** 2 for i in range(mins)])
+
+                prob.Obj(z_max_sum - z_min_sum + penalty)
+                return {
+                    "input": xp,
+                    "z_max": z_max,
+                    "lamb": lamb,
+                    "z_min": z_min_expr,
+                    "prob": prob,
+                }
 
             if "y_op" in options:
                 # TODO Probably just have to change the definition of normD in C_op
@@ -863,86 +881,70 @@ class Simulation:
 
                     quad = sum(
                         [
-                            r[i] * self.net.W[i][j] * r[j]
+                            r[i] * W[i][j] * r[j]
                             for i in range(self.net.N)
                             for j in range(self.net.N)
                         ]
                     )
                     cost = 2 * sum(
-                        [
-                            r[i] * (C[i] - self.net.F[i, :] @ xp)
-                            for i in range(self.net.N)
-                        ]
+                        [r[i] * (C[i] - F[i, :] @ xp) for i in range(self.net.N)]
                     )
                     prob.Obj(-quad + cost)
                     return {"input": xp, "r": r, "prob": prob}
                 else:  # some uncoupled constraints -> min r_min (max r_max)
-                    r_max = prob.Array(prob.Var, rmaxs)
-                    lamb = prob.Array(prob.Var, rmaxs)
-                    r_min = prob.Array(prob.Var, rmins)
+                    r_max = prob.Array(prob.Var, rmaxs, lb=0.0)
+                    lamb = prob.Array(prob.Var, rmaxs, lb=0.0)
+                    r_min = prob.Array(prob.Var, rmins, lb=0.0)
                     xp = prob.Array(prob.FV, self.net.di)
 
                     for i in range(rmaxs):
-                        prob.Equation(-r_max[i] <= 0)
-                        prob.Equation(lamb[i] >= 0)
                         prob.Equation(-lamb[i] * r_max[i] == 0)
 
                         imax = rmax_idx[i]
                         prob.Equation(
                             -2
                             * sum(
-                                [
-                                    r_min[j] * self.net.W[rmin_idx[j], imax]
-                                    for j in range(rmins)
-                                ]
+                                [r_min[j] * W[rmin_idx[j], imax] for j in range(rmins)]
                             )
                             + 2
                             * sum(
-                                [
-                                    r_max[j] * self.net.W[rmax_idx[j], imax]
-                                    for j in range(rmaxs)
-                                ]
+                                [r_max[j] * W[rmax_idx[j], imax] for j in range(rmaxs)]
                             )
-                            - 2 * (C[imax] - self.net.F[imax, :] @ xp)
+                            - 2 * (C[imax] - F[imax, :] @ xp)
                             + lamb[i]
                             == 0
                         )
 
-                    for i in range(rmins):
-                        prob.Equation(-r_min[i] <= 0)
-
                     quad_minmin = sum(
                         [
-                            r_min[i] * self.net.W[rmin_idx[i], rmin_idx[j]] * r_min[j]
+                            r_min[i] * W[rmin_idx[i], rmin_idx[j]] * r_min[j]
                             for i in range(rmins)
                             for j in range(rmins)
                         ]
                     )
                     quad_minmax = sum(
                         [
-                            r_min[i] * self.net.W[rmin_idx[i], rmax_idx[j]] * r_max[j]
+                            r_min[i] * W[rmin_idx[i], rmax_idx[j]] * r_max[j]
                             for i in range(rmins)
                             for j in range(rmaxs)
                         ]
                     )
                     quad_maxmax = sum(
                         [
-                            r_max[i] * self.net.W[rmax_idx[i], rmax_idx[j]] * r_max[j]
+                            r_max[i] * W[rmax_idx[i], rmax_idx[j]] * r_max[j]
                             for i in range(rmaxs)
                             for j in range(rmaxs)
                         ]
                     )
                     cost_min = 2 * sum(
                         [
-                            r_min[i]
-                            * (C[rmin_idx[i]] - self.net.F[rmin_idx[i], :] @ xp)
+                            r_min[i] * (C[rmin_idx[i]] - F[rmin_idx[i], :] @ xp)
                             for i in range(rmins)
                         ]
                     )
                     cost_max = 2 * sum(
                         [
-                            r_max[i]
-                            * (C[rmax_idx[i]] - self.net.F[rmax_idx[i], :] @ xp)
+                            r_max[i] * (C[rmax_idx[i]] - F[rmax_idx[i], :] @ xp)
                             for i in range(rmaxs)
                         ]
                     )
@@ -953,7 +955,13 @@ class Simulation:
                         + cost_min
                         - cost_max
                     )
-                    return {"input": xp, "r_max": r_max, "r_min": r_min, "prob": prob}
+                    return {
+                        "input": xp,
+                        "r_max": r_max,
+                        "r_min": r_min,
+                        "lamb": lamb,
+                        "prob": prob,
+                    }
 
             if "r_op" in options:
                 # TODO Probably just have to change the definition of normD in C_op
@@ -993,8 +1001,9 @@ class Simulation:
                     z_min_init = z_init[:mins]
                     for i in range(maxs):
                         prob_dict["z_max"][i].value = z_max_init[i]
-                    for i in range(mins):
-                        prob_dict["z_min"][i].value = z_min_init[i]
+                    lamb_init, _ = nnls(EAL[:, :mins].T, -z_min_init)
+                    for i, val in enumerate(lamb_init):
+                        prob_dict["lamb"][i].value = float(val)
 
                 if prob_dict["name"] in {"prob_r_op", "prob_r_op_lim"}:
                     if hasattr(
@@ -1013,26 +1022,24 @@ class Simulation:
                             prob_dict["r_max"][i].value = r_max_init[i]
                         for i in range(self.net.do - rmaxs):
                             prob_dict["r_min"][i].value = r_min_init[i]
+                        C_temp = C_op if prob_dict["name"] == "prob_r_op" else C_op_lim
+                        lamb_init = 2 * (
+                            -(r_min_init @ self.net.W[rmin_idx, rmax_idx])
+                            + (r_max_init @ self.net.W[rmax_idx, rmax_idx])
+                            - (
+                                C_temp[rmax_idx]
+                                - self.net.F[rmax_idx, :] @ x_values[:, j]
+                            )
+                        )
+                        for i, val in enumerate(lamb_init):
+                            prob_dict["lamb"][i].value = float(val)
 
                 prob = prob_dict["prob"]
                 fail = False
                 prob.options.SOLVER = 1
+                prob.options.MAX_ITER = 1000
                 try:
                     prob.solve(disp=True)
-                    # i = 0
-                    # prob.solve(warm_start=False)
-                    # # if i == 2:
-                    # #     k = 0
-                    # #     while (
-                    # #         not np.all((r_opv.value > 0.5) + (r_opv.value < 1e-6)) and k < 3
-                    # #     ):
-                    # #         idx = np.where((r_opv.value > 1e-6) * (r_opv.value < 0.5))
-                    # #         newprob = cp.Problem(
-                    # #             prob.objective, prob.constraints + [r_opv[idx] == 0]
-                    # #         )
-                    # #         newprob.solve(warm_start=False)
-                    # #         k += 1
-                    # i += 1
                 except BaseException:
                     fail = True
 
@@ -1041,9 +1048,10 @@ class Simulation:
                         z_max = np.array(
                             [prob_dict["z_max"][i].value for i in range(maxs)]
                         )
-                        z_min = np.array(
-                            [prob_dict["z_min"][i].value for i in range(mins)]
+                        lamb = np.array(
+                            [prob_dict["lamb"][i].value for i in range(self.net.N)]
                         )
+                        z_min = (-lamb.T @ EAL[:, :mins]).T
                         y_op_val = np.linalg.pinv(A) @ np.vstack((z_min, z_max))
                         y_op[:, cols] = y_op_val
                     else:
@@ -1053,12 +1061,10 @@ class Simulation:
                         z_max = np.array(
                             [prob_dict["z_max"][i].value for i in range(maxs)]
                         )
-                        z_min = np.array(
-                            [
-                                prob_dict["z_min"][i].value
-                                for i in range(self.net.do - maxs)
-                            ]
+                        lamb = np.array(
+                            [prob_dict["lamb"][i].value for i in range(self.net.N)]
                         )
+                        z_min = (-lamb.T @ EAL[:, :mins]).T
                         y_op_lim_val = np.linalg.pinv(A) @ np.vstack((z_min, z_max))
                         y_op_lim[:, cols] = y_op_lim_val
                     else:
@@ -2104,6 +2110,69 @@ class Simulation:
             artists[0][i][0].set_ydata(V[i, :])
             artists[0][i][1].set_xdata(xaxis)
             artists[0][i][1].set_ydata(Tv[i, :])
+
+    def save(self, dir: str = "./data/", name: str = "") -> tuple[str, str]:
+        """
+        Save the results of the simulation to pickle file.
+
+        Parameters
+        ----------
+        dir : str, default='./data/'
+            Directory to save the results.
+
+        name : str, default=''
+            Name of the saved file. If empty, a name is generated based on the
+            simulation tags.
+
+        Returns
+        -------
+        path : str
+            Path to the saved file.
+
+        name : str
+            Name of the saved file.
+        """
+
+        os.makedirs(dir, exist_ok=True)
+        name = (
+            self.time_stamp + "-" + self.stag + "-" + self.rtag + "-" + self.otag
+            if name == ""
+            else name
+        )
+        path = dir + name + "-results.pkl"
+        with open(
+            path,
+            "wb",
+        ) as f:
+            pickle.dump(self.__dict__, f)
+
+        return path, name
+
+    def load(self, dir: str = "./data/", name: str = "") -> None:
+        """
+        Load the results of the simulation from pickle file.
+
+        Parameters
+        ----------
+        dir : str, default='./data/'
+            Directory to load the results from.
+
+        name : str, default=''
+            Name of the file to load. If empty, the name used is based on the
+            simulation tags.
+        """
+        name = (
+            self.time_stamp + "-" + self.stag + "-" + self.rtag + "-" + self.otag
+            if name == ""
+            else name
+        )
+        path = dir + name + "-results.pkl"
+        with open(
+            path,
+            "rb",
+        ) as f:
+            tmp_dict = pickle.load(f)
+            self.__dict__.update(tmp_dict)
 
     def _crop(self, t: float = -1, type: str = "io") -> tuple[np.ndarray, ...]:
         """

@@ -1024,9 +1024,9 @@ class Simulation:
                             prob_dict["r_min"][i].value = r_min_init[i]
                         C_temp = C_op if prob_dict["name"] == "prob_r_op" else C_op_lim
                         lamb_init = 2 * (
-                            -(r_min_init @ self.net.W[rmin_idx, rmax_idx])
-                            + (r_max_init @ self.net.W[rmax_idx, rmax_idx])
-                            - (
+                            (r_min_init @ self.net.W[rmin_idx][:, rmax_idx])
+                            - (r_max_init @ self.net.W[rmax_idx][:, rmax_idx])
+                            + (
                                 C_temp[rmax_idx]
                                 - self.net.F[rmax_idx, :] @ x_values[:, j]
                             )

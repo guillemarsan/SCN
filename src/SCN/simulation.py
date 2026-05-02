@@ -242,7 +242,9 @@ class Simulation:
             if V0 is not None or r0 is not None:
                 raise Warning("y0 was given and prioritized over r0 and V0")
             r0, res = nnls(self.net.D, y0)
-            assert r0 is not None and res < 1e-6, "failed to compute r0 with nnls"
+            assert (
+                r0 is not None and res < 1e-6
+            ), "Not possible to find r0 s.t. D r0 = y0"
             V0 = self.net.E @ y0
         elif r0 is not None:
             if V0 is not None:
@@ -257,17 +259,25 @@ class Simulation:
                     V0 = V0 - I[:, 0]
                 case "FI":
                     V0 = V0 - self.net.F @ x[:, 0] - I[:, 0]
-            y0 = np.linalg.lstsq(
+            y0, res, *_ = np.linalg.lstsq(
                 self.net.E,
                 V0,
                 rcond=None,
-            )[0]
-            r0 = np.linalg.lstsq(self.net.D, y0, rcond=None)[0]
+            )
+            assert (
+                len(res) == 0 or res[0] < 1e-6
+            ), "Not possible to find y0 s.t. V0 = E y0"
+            r0, res = nnls(self.net.D, y0)
+            assert (
+                r0 is not None and res < 1e-6
+            ), "Not possible to find r0 s.t. D r0 = y0"
         else:
             if isinstance(self.net, Autoencoder):
                 y0 = x[:, 0]
-                r0 = nnls(self.net.D, y0)[0]
-                assert r0 is not None, "failed to compute r0 with nnls"
+                r0, res = nnls(self.net.D, y0)
+                assert (
+                    r0 is not None and res < 1e-6
+                ), "Not possible to find r0 s.t. D r0 = y0"
                 V0 = self.net.E @ y0
             else:
                 # TODO Start within the subthreshold area
@@ -614,6 +624,7 @@ class Simulation:
         Q : ndarray of shape (do,do), default=None
             Matrix of the optimization. If None, it is inferred from the decoders and encoders.
 
+
         options : ndarray of str, default=None
             Options of the optimization. Subset of ['y_op', 'y_op_lim', 'r_op', 'r_op_lim']. If None, all are computed.
 
@@ -707,7 +718,7 @@ class Simulation:
                 + self.net.E @ y_opv
                 + Ip
                 - self.net.T
-                + np.diag(self.net.D.T @ Q @ self.net.D) / 2
+                - np.diag(self.net.W) / 2
                 <= 0
             ]
             prob = cp.Problem(obj, constraints)
@@ -721,20 +732,18 @@ class Simulation:
             probs.append(prob)
         if "r_op" in options:
             obj = cp.Minimize(
-                -2 * r_opv.T @ self.net.F @ xp
-                + cp.quad_form(self.net.D @ r_opv, Q)
+                -cp.quad_form(r_opv, self.net.W)
                 + 2
                 * r_opv.T
-                @ (self.net.T - Ip - np.diag(self.net.D.T @ Q @ self.net.D) / 2)
+                @ (self.net.T - self.net.F @ xp - Ip + np.diag(self.net.W) / 2)
             )
             constraints = [r_opv >= 0]
             prob = cp.Problem(obj, list(constraints))
             probs.append(prob)
         if "r_op_lim" in options:
             obj = cp.Minimize(
-                -2 * r_opv_lim.T @ self.net.F @ xp
-                + cp.quad_form(self.net.D @ r_opv_lim, Q)
-                + 2 * r_opv_lim.T @ (self.net.T - Ip)
+                -cp.quad_form(r_opv_lim, self.net.W)
+                + 2 * r_opv_lim.T @ (self.net.T - self.net.F @ xp - Ip)
             )
             constraints = [r_opv_lim >= 0]
             prob = cp.Problem(obj, list(constraints))
@@ -787,7 +796,18 @@ class Simulation:
         A, S = _canon_symmetric(Q_norm)
         EAL = self.net.E @ np.linalg.pinv(A)
 
-        jump = np.diag(self.net.W)
+        signs = np.diag(S)
+        maxs = np.sum(signs == -1)
+        mins = np.sum(signs == 1)
+
+        rmax_idx = np.where(np.all(np.isclose(EAL[:, :mins], 0, atol=1e-7), axis=1))[0]
+        rmin_idx = np.where(
+            ~np.all(np.isclose(EAL[:, :mins], 0, atol=1e-7, rtol=0), axis=1)
+        )[0]
+        rmaxs = rmax_idx.shape[0]
+        rmins = rmin_idx.shape[0]
+
+        jump = np.diag(self.net.W).copy()
         C_op = self.net.T - self.I[:, 0] + jump / 2
         C_op_lim = self.net.T - self.I[:, 0]
 
@@ -797,15 +817,6 @@ class Simulation:
         C_op_lim = np.round(C_op_lim, decimals=6)
         F = np.round(self.net.F, decimals=6)
         W = np.round(self.net.W, decimals=6)
-
-        signs = np.diag(S)
-        maxs = np.sum(signs == -1)
-        mins = np.sum(signs == 1)
-
-        rmax_idx = np.where(np.all(EAL[:, :mins] == 0, axis=1))[0]
-        rmin_idx = np.where(np.any(EAL[:, :mins] != 0, axis=1))[0]
-        rmaxs = rmax_idx.shape[0]
-        rmins = rmin_idx.shape[0]
 
         probs = []
         if "y_op" in options or "y_op_lim" in options:
@@ -829,21 +840,28 @@ class Simulation:
                     )
 
                 alpha = 1e6  # penalty coefficient
-                penalty_terms = [
-                    lamb[i]
-                    * (
-                        F[i, :] @ xp
-                        + EAL[i, :mins] @ z_min_expr
-                        + EAL[i, mins:] @ z_max
-                        - C[i]
+                for i in range(self.net.N):
+                    penalty_term = (
+                        alpha
+                        * (
+                            lamb[i]
+                            * (
+                                F[i, :] @ xp
+                                + EAL[i, :mins] @ z_min_expr
+                                + EAL[i, mins:] @ z_max
+                                - C[i]
+                            )
+                        )
+                        ** 2
                     )
-                    for i in range(self.net.N)
-                ]
-                penalty = alpha * sum([t**2 for t in penalty_terms])
+
+                    penalty_term = prob.Intermediate(penalty_term)
+                    prob.Minimize(penalty_term)
+
                 z_max_sum = sum([z_max[i] ** 2 for i in range(maxs)])
                 z_min_sum = sum([z_min_expr[i] ** 2 for i in range(mins)])
 
-                prob.Obj(z_max_sum - z_min_sum + penalty)
+                prob.Minimize(z_max_sum - z_min_sum)
                 return {
                     "input": xp,
                     "z_max": z_max,
@@ -1020,7 +1038,7 @@ class Simulation:
                         r_min_init = r_init[rmin_idx]
                         for i in range(rmaxs):
                             prob_dict["r_max"][i].value = r_max_init[i]
-                        for i in range(self.net.do - rmaxs):
+                        for i in range(rmins):
                             prob_dict["r_min"][i].value = r_min_init[i]
                         C_temp = C_op if prob_dict["name"] == "prob_r_op" else C_op_lim
                         lamb_init = 2 * (

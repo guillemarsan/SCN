@@ -177,7 +177,9 @@ class Low_rank_LIF:
         A, S = _canon_symmetric(Q)
         negdef = -1 if np.all(np.diag(S) < 0) else 1
         EAinv = E @ np.linalg.inv(A)
-        Coup = np.diag(1 - 2 * np.all(np.isclose(EAinv[:, np.diag(S) == 1], 0), axis=1))
+        Coup = np.diag(
+            1 - 2 * np.all(np.isclose(EAinv[:, np.diag(S) == 1], 0, atol=1e-7), axis=1)
+        )
 
         D = spike_scale * -negdef * np.linalg.inv(Q) @ E.T @ Coup
 

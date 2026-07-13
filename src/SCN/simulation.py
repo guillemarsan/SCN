@@ -672,7 +672,7 @@ class Simulation:
         else:
             # not positive semidefinite -> non-convex optimization
             # TODO
-            y_op, y_op_lim, r_op, r_op_lim = self._optimize_cvx_ccv3(Q, options)
+            y_op, y_op_lim, r_op, r_op_lim = self._optimize_cvx_ccv(Q, options)
             # raise ValueError("Non convex optimization not implemented yet")
 
         if self.latent_bias:
@@ -788,7 +788,7 @@ class Simulation:
 
         return y_op, y_op_lim, r_op, r_op_lim
 
-    def _optimize_cvx_ccv3(self, Q, options):
+    def _optimize_cvx_ccv(self, Q, options):
 
         x_values = np.unique(self.x, axis=1)
 
@@ -797,26 +797,32 @@ class Simulation:
         EAL = self.net.E @ np.linalg.pinv(A)
 
         signs = np.diag(S)
-        maxs = np.sum(signs == -1)
-        mins = np.sum(signs == 1)
+        min_idx = np.where(signs == 1)[0]
+        max_idx = np.where(signs == -1)[0]
+        mins = min_idx.shape[0]
 
-        rmax_idx = np.where(np.all(np.isclose(EAL[:, :mins], 0, atol=1e-7), axis=1))[0]
-        rmin_idx = np.where(
-            ~np.all(np.isclose(EAL[:, :mins], 0, atol=1e-7, rtol=0), axis=1)
+        rncoup_idx = np.where(
+            np.all(np.isclose(EAL[:, max_idx], 0, atol=1e-7), axis=1)
         )[0]
-        rmaxs = rmax_idx.shape[0]
-        rmins = rmin_idx.shape[0]
+        rcoup_idx = np.where(
+            ~np.all(np.isclose(EAL[:, max_idx], 0, atol=1e-7, rtol=0), axis=1)
+        )[0]
+        rncoups = rncoup_idx.shape[0]
+        rcoups = rcoup_idx.shape[0]
 
         jump = np.diag(self.net.W).copy()
         C_op = self.net.T - self.I[:, 0] + jump / 2
         C_op_lim = self.net.T - self.I[:, 0]
 
         # Gekko limited memory
-        EAL = np.round(EAL, decimals=6)
-        C_op = np.round(C_op, decimals=6)
-        C_op_lim = np.round(C_op_lim, decimals=6)
-        F = np.round(self.net.F, decimals=6)
-        W = np.round(self.net.W, decimals=6)
+        # EAL = np.round(EAL, decimals=6)
+        # C_op = np.round(C_op, decimals=6)
+        # C_op_lim = np.round(C_op_lim, decimals=6)
+        # F = np.round(self.net.F, decimals=6)
+        # W = np.round(self.net.W, decimals=6)
+        F = self.net.F
+        W = self.net.W
+        E = self.net.E
 
         probs = []
         if "y_op" in options or "y_op_lim" in options:
@@ -824,49 +830,81 @@ class Simulation:
             def _prob_y_gen(C):
                 prob = GEKKO(remote=False)
 
-                z_max = prob.Array(prob.Var, maxs)
-                lamb = prob.Array(prob.Var, self.net.N, lb=0.0)
+                y_min = prob.Array(prob.Var, mins)
+                lamb = prob.Array(prob.Var, rcoups, lb=0.0)
                 xp = prob.Array(prob.Param, self.net.di)
 
-                z_min_expr = [-lamb @ EAL[:, i] for i in range(mins)]
-
-                for i in range(self.net.N):
+                for i in range(rncoups):
                     prob.Equation(
-                        F[i, :] @ xp
-                        + EAL[i, :mins] @ z_min_expr
-                        + EAL[i, mins:] @ z_max
-                        - C[i]
+                        F[rncoup_idx[i], :] @ xp
+                        + E[rncoup_idx[i], min_idx] @ y_min
+                        - C[rncoup_idx[i]]
                         <= 0
                     )
 
-                alpha = 1e6  # penalty coefficient
-                for i in range(self.net.N):
-                    penalty_term = (
-                        alpha
-                        * (
-                            lamb[i]
-                            * (
-                                F[i, :] @ xp
-                                + EAL[i, :mins] @ z_min_expr
-                                + EAL[i, mins:] @ z_max
-                                - C[i]
-                            )
-                        )
-                        ** 2
+                # quad_min = sum(
+                #     [
+                #         y_min[i] * Q[i][j] * y_min[j]
+                #         for i in range(mins)
+                #         for j in range(mins)
+                #     ]
+                # )
+
+                quad_min = 0
+                for i in range(mins):
+                    for j in range(mins):
+                        if Q[i][j] != 0:
+                            quad_min += y_min[i] * Q[i][j] * y_min[j]
+
+                EQET = (
+                    E[rcoup_idx][:, max_idx]
+                    @ np.linalg.inv(Q[max_idx][:, max_idx])
+                    @ E[rcoup_idx][:, max_idx].T
+                )
+                EQET = np.round(EQET, decimals=6)
+                # quad_max = sum(
+                #     [
+                #         lamb[i] * EQET[i][j] * lamb[j]
+                #         for i in range(rcoups)
+                #         for j in range(rcoups)
+                #     ]
+                # )
+                for i in range(rcoups):
+                    quad_max_subi = lamb[i] * EQET[i][i] * lamb[i]
+                    quad_max_sub = (
+                        2
+                        * lamb[i]
+                        * sum([EQET[i][j] * lamb[j] for j in range(i + 1, rcoups)])
                     )
+                    prob.Minimize(-quad_max_subi)
+                    prob.Minimize(-quad_max_sub)
 
-                    penalty_term = prob.Intermediate(penalty_term)
-                    prob.Minimize(penalty_term)
+                # lag_coup = sum(
+                #     [
+                #         lamb[i]
+                #         * (
+                #             F[rcoup_idx[i], :] @ xp
+                #             + E[rcoup_idx[i], min_idx] @ y_min
+                #             - C[rcoup_idx[i]]
+                #         )
+                #         for i in range(rcoups)
+                #     ]
+                # )
+                for i in range(rcoups):
+                    lag_coup_sub = lamb[i] * (
+                        F[rcoup_idx[i], :] @ xp
+                        + E[rcoup_idx[i], min_idx] @ y_min
+                        - C[rcoup_idx[i]]
+                    )
+                    prob.Minimize(-2 * lag_coup_sub)
 
-                z_max_sum = sum([z_max[i] ** 2 for i in range(maxs)])
-                z_min_sum = sum([z_min_expr[i] ** 2 for i in range(mins)])
-
-                prob.Minimize(z_max_sum - z_min_sum)
+                prob.Minimize(quad_min)
+                # prob.Minimize(-quad_max)
+                # prob.Minimize(-2 * lag_coup)
                 return {
                     "input": xp,
-                    "z_max": z_max,
+                    "y_min": y_min,
                     "lamb": lamb,
-                    "z_min": z_min_expr,
                     "prob": prob,
                 }
 
@@ -889,8 +927,14 @@ class Simulation:
             def _prob_r_gen(C):
                 prob = GEKKO(remote=False)
 
-                if rmaxs == 0:  # all coupled constraints -> min r
-                    print("all coupled constraints")
+                if (
+                    rncoups == 0 or rcoups == 0
+                ):  # all (non) coupled constraints -> min r
+                    (
+                        print("all coupled constraints")
+                        if rncoups == 0
+                        else print("all non-coupled constraints")
+                    )
                     r = prob.Array(prob.Var, self.net.N)
                     xp = prob.Array(prob.FV, self.net.di)
 
@@ -909,24 +953,30 @@ class Simulation:
                     )
                     prob.Obj(-quad + cost)
                     return {"input": xp, "r": r, "prob": prob}
-                else:  # some uncoupled constraints -> min r_min (max r_max)
-                    r_max = prob.Array(prob.Var, rmaxs, lb=0.0)
-                    lamb = prob.Array(prob.Var, rmaxs, lb=0.0)
-                    r_min = prob.Array(prob.Var, rmins, lb=0.0)
+                else:  # some non-coupled constraints -> min r_min (max r_max)
+                    r_ncoups = prob.Array(prob.Var, rncoups, lb=0.0)
+                    lamb = prob.Array(prob.Var, rncoups, lb=0.0)
+                    r_coups = prob.Array(prob.Var, rcoups, lb=0.0)
                     xp = prob.Array(prob.FV, self.net.di)
 
-                    for i in range(rmaxs):
-                        prob.Equation(-lamb[i] * r_max[i] == 0)
+                    for i in range(rncoups):
+                        prob.Equation(-lamb[i] * r_ncoups[i] == 0)
 
-                        imax = rmax_idx[i]
+                        imax = rncoup_idx[i]
                         prob.Equation(
                             -2
                             * sum(
-                                [r_min[j] * W[rmin_idx[j], imax] for j in range(rmins)]
+                                [
+                                    r_coups[j] * W[rcoup_idx[j], imax]
+                                    for j in range(rcoups)
+                                ]
                             )
                             + 2
                             * sum(
-                                [r_max[j] * W[rmax_idx[j], imax] for j in range(rmaxs)]
+                                [
+                                    r_ncoups[j] * W[rncoup_idx[j], imax]
+                                    for j in range(rncoups)
+                                ]
                             )
                             - 2 * (C[imax] - F[imax, :] @ xp)
                             + lamb[i]
@@ -935,35 +985,35 @@ class Simulation:
 
                     quad_minmin = sum(
                         [
-                            r_min[i] * W[rmin_idx[i], rmin_idx[j]] * r_min[j]
-                            for i in range(rmins)
-                            for j in range(rmins)
+                            r_coups[i] * W[rcoup_idx[i], rcoup_idx[j]] * r_coups[j]
+                            for i in range(rcoups)
+                            for j in range(rcoups)
                         ]
                     )
                     quad_minmax = sum(
                         [
-                            r_min[i] * W[rmin_idx[i], rmax_idx[j]] * r_max[j]
-                            for i in range(rmins)
-                            for j in range(rmaxs)
+                            r_coups[i] * W[rcoup_idx[i], rncoup_idx[j]] * r_ncoups[j]
+                            for i in range(rcoups)
+                            for j in range(rncoups)
                         ]
                     )
                     quad_maxmax = sum(
                         [
-                            r_max[i] * W[rmax_idx[i], rmax_idx[j]] * r_max[j]
-                            for i in range(rmaxs)
-                            for j in range(rmaxs)
+                            r_ncoups[i] * W[rncoup_idx[i], rncoup_idx[j]] * r_ncoups[j]
+                            for i in range(rncoups)
+                            for j in range(rncoups)
                         ]
                     )
                     cost_min = 2 * sum(
                         [
-                            r_min[i] * (C[rmin_idx[i]] - F[rmin_idx[i], :] @ xp)
-                            for i in range(rmins)
+                            r_coups[i] * (C[rcoup_idx[i]] - F[rcoup_idx[i], :] @ xp)
+                            for i in range(rcoups)
                         ]
                     )
                     cost_max = 2 * sum(
                         [
-                            r_max[i] * (C[rmax_idx[i]] - F[rmax_idx[i], :] @ xp)
-                            for i in range(rmaxs)
+                            r_ncoups[i] * (C[rncoup_idx[i]] - F[rncoup_idx[i], :] @ xp)
+                            for i in range(rncoups)
                         ]
                     )
                     prob.Obj(
@@ -975,8 +1025,8 @@ class Simulation:
                     )
                     return {
                         "input": xp,
-                        "r_max": r_max,
-                        "r_min": r_min,
+                        "r_coup": r_coups,
+                        "r_ncoup": r_ncoups,
                         "lamb": lamb,
                         "prob": prob,
                     }
@@ -1007,19 +1057,24 @@ class Simulation:
                     if hasattr(
                         self, "y"
                     ):  # initialize guess near last y with this input
-                        y_init = self.y[:, cols[-1]]
+                        y_init = (
+                            self.y[:, cols[-1]]
+                            if not self.latent_bias
+                            else self.y[:, cols[-1]] - self.bias
+                        )
                     else:  # initialize at least in feasible region
                         y_init = np.linalg.lstsq(
                             self.net.E,
                             C_op + self.net.F @ x_values[:, j] - 1e-2,
                             rcond=None,
                         )[0]
-                    z_init = A @ y_init
-                    z_max_init = z_init[mins:]
-                    z_min_init = z_init[:mins]
-                    for i in range(maxs):
-                        prob_dict["z_max"][i].value = z_max_init[i]
-                    lamb_init, _ = nnls(EAL[:, :mins].T, -z_min_init)
+                    y_min_init = y_init[min_idx]
+                    y_max_init = y_init[max_idx]
+                    for i in range(mins):
+                        prob_dict["y_min"][i].value = y_min_init[i]
+                    lamb_init, _ = nnls(
+                        E[rcoup_idx][:, max_idx].T, Q[max_idx][:, max_idx] @ y_max_init
+                    )
                     for i, val in enumerate(lamb_init):
                         prob_dict["lamb"][i].value = float(val)
 
@@ -1030,23 +1085,25 @@ class Simulation:
                         r_init = self.r[:, cols[-1]]
                     else:  # initialize at least in feasible region
                         r_init = 1e-2 * np.ones(self.net.N)
-                    if rmaxs == 0:
+                    if (
+                        rncoups == 0 or rcoups == 0
+                    ):  # all (non) coupled constraints -> min r
                         for i in range(self.net.N):
                             prob_dict["r"][i].value = r_init[i]
                     else:
-                        r_max_init = r_init[rmax_idx]
-                        r_min_init = r_init[rmin_idx]
-                        for i in range(rmaxs):
-                            prob_dict["r_max"][i].value = r_max_init[i]
-                        for i in range(rmins):
-                            prob_dict["r_min"][i].value = r_min_init[i]
+                        r_coup_init = r_init[rcoup_idx]
+                        r_ncoup_init = r_init[rncoup_idx]
+                        for i in range(rcoups):
+                            prob_dict["r_coup"][i].value = r_coup_init[i]
+                        for i in range(rncoups):
+                            prob_dict["r_ncoup"][i].value = r_ncoup_init[i]
                         C_temp = C_op if prob_dict["name"] == "prob_r_op" else C_op_lim
                         lamb_init = 2 * (
-                            (r_min_init @ self.net.W[rmin_idx][:, rmax_idx])
-                            - (r_max_init @ self.net.W[rmax_idx][:, rmax_idx])
+                            (r_coup_init @ self.net.W[rcoup_idx][:, rncoup_idx])
+                            - (r_ncoup_init @ self.net.W[rncoup_idx][:, rncoup_idx])
                             + (
-                                C_temp[rmax_idx]
-                                - self.net.F[rmax_idx, :] @ x_values[:, j]
+                                C_temp[rncoup_idx]
+                                - self.net.F[rncoup_idx, :] @ x_values[:, j]
                             )
                         )
                         for i, val in enumerate(lamb_init):
@@ -1063,69 +1120,69 @@ class Simulation:
 
                 if prob_dict["name"] == "prob_y_op":
                     if not fail:
-                        z_max = np.array(
-                            [prob_dict["z_max"][i].value for i in range(maxs)]
+                        y_min = np.array(
+                            [prob_dict["y_min"][i].value for i in range(mins)]
                         )
                         lamb = np.array(
-                            [prob_dict["lamb"][i].value for i in range(self.net.N)]
+                            [prob_dict["lamb"][i].value for i in range(rcoups)]
                         )
-                        z_min = (-lamb.T @ EAL[:, :mins]).T
-                        y_op_val = np.linalg.pinv(A) @ np.vstack((z_min, z_max))
+                        y_max = np.linalg.inv(Q[max_idx][:, max_idx]) @ (
+                            E[rcoup_idx][:, max_idx].T @ lamb
+                        )
+                        y_op_val = np.vstack((y_min, y_max))
                         y_op[:, cols] = y_op_val
                     else:
                         y_op[:, cols] = np.nan
                 if prob_dict["name"] == "prob_y_op_lim":
                     if not fail:
-                        z_max = np.array(
-                            [prob_dict["z_max"][i].value for i in range(maxs)]
+                        y_min = np.array(
+                            [prob_dict["y_min"][i].value for i in range(mins)]
                         )
                         lamb = np.array(
-                            [prob_dict["lamb"][i].value for i in range(self.net.N)]
+                            [prob_dict["lamb"][i].value for i in range(rcoups)]
                         )
-                        z_min = (-lamb.T @ EAL[:, :mins]).T
-                        y_op_lim_val = np.linalg.pinv(A) @ np.vstack((z_min, z_max))
+                        y_max = np.linalg.inv(Q[max_idx][:, max_idx]) @ (
+                            E[rcoup_idx][:, max_idx].T @ lamb
+                        )
+                        y_op_lim_val = np.vstack((y_min, y_max))
                         y_op_lim[:, cols] = y_op_lim_val
                     else:
                         y_op_lim[:, cols] = np.nan
                 if prob_dict["name"] == "prob_r_op":
                     if not fail:
-                        if rmaxs == 0:
+                        if rncoups == 0 or rcoups == 0:
                             r_op[:, cols] = np.array(
                                 [prob_dict["r"][i].value for i in range(self.net.N)]
                             )
                         else:
-                            r_max = np.array(
-                                [prob_dict["r_max"][i].value for i in range(rmaxs)]
+                            r_coup = np.array(
+                                [prob_dict["r_coup"][i].value for i in range(rcoups)]
                             )
-                            r_min = np.array(
-                                [
-                                    prob_dict["r_min"][i].value
-                                    for i in range(self.net.N - rmaxs)
-                                ]
+                            r_ncoup = np.array(
+                                [prob_dict["r_ncoup"][i].value for i in range(rncoups)]
                             )
-                            r_op[np.ix_(rmax_idx, cols)] = r_max
-                            r_op[np.ix_(rmin_idx, cols)] = r_min
+
+                            r_op[np.ix_(rcoup_idx, cols)] = r_coup
+                            r_op[np.ix_(rncoup_idx, cols)] = r_ncoup
                     else:
                         r_op[:, cols] = np.nan
 
                 if prob_dict["name"] == "prob_r_op_lim":
                     if not fail:
-                        if rmaxs == 0:
+                        if rncoups == 0 or rcoups == 0:
                             r_op_lim[:, cols] = np.array(
                                 [prob_dict["r"][i].value for i in range(self.net.N)]
                             )
                         else:
-                            r_max = np.array(
-                                [prob_dict["r_max"][i].value for i in range(rmaxs)]
+                            r_coup = np.array(
+                                [prob_dict["r_coup"][i].value for i in range(rcoups)]
                             )
-                            r_min = np.array(
-                                [
-                                    prob_dict["r_min"][i].value
-                                    for i in range(self.net.N - rmaxs)
-                                ]
+                            r_ncoup = np.array(
+                                [prob_dict["r_ncoup"][i].value for i in range(rncoups)]
                             )
-                            r_op_lim[np.ix_(rmax_idx, cols)] = r_max
-                            r_op_lim[np.ix_(rmin_idx, cols)] = r_min
+
+                            r_op_lim[np.ix_(rcoup_idx, cols)] = r_coup
+                            r_op_lim[np.ix_(rncoup_idx, cols)] = r_ncoup
                     else:
                         r_op_lim[:, cols] = np.nan
 
@@ -1563,8 +1620,11 @@ class Simulation:
         for i in range(self.net.N):
             label = ""
             if i < 10:
-                for j in np.arange(i, self.net.N, 10):
-                    label += f"r{j + 1},"
+                if self.net.N < 50:
+                    for j in np.arange(i, self.net.N, 10):
+                        label += f"r{j + 1},"
+                else:
+                    label += f"r_{i + 1}"
             line = ax.plot(xaxis, r[i, :], color=colors[i], label=label)[0]
             liner.append(line)
         artists.append(liner)
@@ -1674,8 +1734,11 @@ class Simulation:
         for i in range(self.net.N):
             label = ""
             if i < 10:
-                for j in np.arange(i, self.net.N, 10):
-                    label += f"V{j + 1},"
+                if self.net.N < 50:
+                    for j in np.arange(i, self.net.N, 10):
+                        label += f"V{j + 1},"
+                else:
+                    label += f"V_{i + 1}"
             line = ax.plot(xaxis, V[i, :], color=colors[i], label=label)[0]
             thresh = ax.plot(
                 xaxis,
@@ -2251,7 +2314,7 @@ class Simulation:
                     if hasattr(self, "r_op_lim")
                     else None
                 )
-                return y_op, y_op_lim, r_op, r_op_lim  # type:ignore
+                return y_op, y_op_lim, r_op, r_op_lim  # type: ignore
             case _:
                 raise ValueError(
                     "type should be 'io', 'inp_curr', 'stimes', 'op', 'voltages' or 'rates'"

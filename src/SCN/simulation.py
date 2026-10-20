@@ -392,7 +392,7 @@ class Simulation:
             case "one":
                 y, r, s, V = self._run_one()
             case _:
-                raise ValueError("draw_break should be 'no', 'slowmo' or 'one'")
+                raise ValueError("draw_break should be 'no', 'slowmo', or 'one'")
 
         self.r = r
         self.s = s
@@ -941,17 +941,16 @@ class Simulation:
                     for i in range(self.net.N):
                         prob.Equation(-r[i] <= 0)
 
-                    quad = sum(
-                        [
-                            r[i] * W[i][j] * r[j]
-                            for i in range(self.net.N)
-                            for j in range(self.net.N)
-                        ]
-                    )
+                    for i in range(self.net.N):
+                        quad_sub = sum(
+                            [r[i] * W[i][j] * r[j] for j in range(self.net.N)]
+                        )
+                        prob.Minimize(-quad_sub)
+
                     cost = 2 * sum(
                         [r[i] * (C[i] - F[i, :] @ xp) for i in range(self.net.N)]
                     )
-                    prob.Obj(-quad + cost)
+                    prob.Minimize(cost)
                     return {"input": xp, "r": r, "prob": prob}
                 else:  # some non-coupled constraints -> min r_min (max r_max)
                     r_ncoups = prob.Array(prob.Var, rncoups, lb=0.0)
@@ -983,46 +982,51 @@ class Simulation:
                             == 0
                         )
 
-                    quad_minmin = sum(
-                        [
-                            r_coups[i] * W[rcoup_idx[i], rcoup_idx[j]] * r_coups[j]
-                            for i in range(rcoups)
-                            for j in range(rcoups)
-                        ]
-                    )
-                    quad_minmax = sum(
-                        [
-                            r_coups[i] * W[rcoup_idx[i], rncoup_idx[j]] * r_ncoups[j]
-                            for i in range(rcoups)
-                            for j in range(rncoups)
-                        ]
-                    )
-                    quad_maxmax = sum(
-                        [
-                            r_ncoups[i] * W[rncoup_idx[i], rncoup_idx[j]] * r_ncoups[j]
-                            for i in range(rncoups)
-                            for j in range(rncoups)
-                        ]
-                    )
+                    for i in range(rcoups):
+                        quad_minmin_sub = sum(
+                            [
+                                r_coups[i] * W[rcoup_idx[i], rcoup_idx[j]] * r_coups[j]
+                                for j in range(rcoups)
+                            ]
+                        )
+                        prob.Minimize(-quad_minmin_sub)
+
+                    for i in range(rcoups):
+                        quad_minmax_sub = sum(
+                            [
+                                r_coups[i]
+                                * W[rcoup_idx[i], rncoup_idx[j]]
+                                * r_ncoups[j]
+                                for j in range(rncoups)
+                            ]
+                        )
+                        prob.Minimize(-2 * quad_minmax_sub)
+
+                    for i in range(rncoups):
+                        quad_maxmax_sub = sum(
+                            [
+                                r_ncoups[i]
+                                * W[rncoup_idx[i], rncoup_idx[j]]
+                                * r_ncoups[j]
+                                for j in range(rncoups)
+                            ]
+                        )
+                        prob.Minimize(quad_maxmax_sub)
+
                     cost_min = 2 * sum(
                         [
                             r_coups[i] * (C[rcoup_idx[i]] - F[rcoup_idx[i], :] @ xp)
                             for i in range(rcoups)
                         ]
                     )
+                    prob.Minimize(cost_min)
                     cost_max = 2 * sum(
                         [
                             r_ncoups[i] * (C[rncoup_idx[i]] - F[rncoup_idx[i], :] @ xp)
                             for i in range(rncoups)
                         ]
                     )
-                    prob.Obj(
-                        -quad_minmin
-                        - 2 * quad_minmax
-                        + quad_maxmax
-                        + cost_min
-                        - cost_max
-                    )
+                    prob.Minimize(-cost_max)
                     return {
                         "input": xp,
                         "r_coup": r_coups,
@@ -1062,6 +1066,10 @@ class Simulation:
                             if not self.latent_bias
                             else self.y[:, cols[-1]] - self.bias
                         )
+                    elif hasattr(
+                        self, "y0"
+                    ):  # initialize guess near y0 with this input
+                        y_init = self.y0
                     else:  # initialize at least in feasible region
                         y_init = np.linalg.lstsq(
                             self.net.E,
@@ -1083,6 +1091,10 @@ class Simulation:
                         self, "r"
                     ):  # initialize guess near last r with this input
                         r_init = self.r[:, cols[-1]]
+                    elif hasattr(
+                        self, "r0"
+                    ):  # initialize guess near r0 with this input
+                        r_init = self.r0
                     else:  # initialize at least in feasible region
                         r_init = 1e-2 * np.ones(self.net.N)
                     if (
